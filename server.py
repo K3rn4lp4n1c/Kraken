@@ -18,4 +18,4 @@ def fetch_web_page(url: str) -> str:
         return f"Error fetching page: {str(e)}"
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    mcp.run(transport="http", host="0.0.0.0", port=8000)
