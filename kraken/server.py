@@ -1,4 +1,3 @@
-#!/.venv/bin/python3
 from fastmcp import FastMCP
 import requests
 
