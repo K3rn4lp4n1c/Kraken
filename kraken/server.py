@@ -2,10 +2,10 @@ from fastmcp import FastMCP
 import requests
 
 # Initialize your server
-mcp = FastMCP("My First Server")
+kraken = FastMCP("My First Server")
 
 # Define a tool using a decorator
-@mcp.tool()
+@kraken.tool()
 def fetch_web_page(url: str) -> str:
     """
     Fetches the raw text content of a given URL. 
@@ -16,6 +16,3 @@ def fetch_web_page(url: str) -> str:
         return response.text[:2000] # Return the first 2000 characters
     except Exception as e:
         return f"Error fetching page: {str(e)}"
-
-if __name__ == "__main__":
-    mcp.run(transport="http", host="0.0.0.0", port=8000)
