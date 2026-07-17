@@ -1,3 +1,3 @@
-from . import main
+from kraken.kraken import main
 
 main()

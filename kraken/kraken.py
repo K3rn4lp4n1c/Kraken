@@ -1,8 +1,16 @@
-from fastmcp import FastMCP
+from . import kraken
+from kraken.captain import captain
 import requests
 
-# Initialize your server
-kraken = FastMCP("My First Server")
+def mount_subservers():
+    kraken.mount(captain, "captain")
+
+def main():
+    mount_subservers()
+    try:
+        kraken.run(transport="http", host="0.0.0.0", port=8000)
+    except KeyboardInterrupt:
+        print("Server stopped by user.")
 
 # Define a tool using a decorator
 @kraken.tool()
