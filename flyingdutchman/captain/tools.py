@@ -15,11 +15,11 @@ def _get_campaigns() -> tuple[bool, str, list[dict]]:
         Each dictionary represents an campaign with its details. 
     """
     try:
-        campaigns_table = env("CAMPAIGNS_TABLE")[0]
+        table_name = env("CAMPAIGNS_TABLE")[0]
         with sqlite3_connect(CAMPAIGNS_DB_PATH) as conn:
             cursor = conn.cursor()
             fields = ["id", "name", "datetime", "url", "status"]
-            cursor.execute("SELECT {} FROM {}".format(', '.join(fields), campaigns_table))
+            cursor.execute("SELECT {} FROM {} WHERE id <> 0".format(', '.join(fields), table_name))
             rows = cursor.fetchall()
             campaigns = [dict(zip(fields, row)) for row in rows]
             return True, "Campaigns fetched successfully.", campaigns
