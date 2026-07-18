@@ -20,7 +20,7 @@ def main():
     mount_subservers()
     try:
         if debug: load_dotenv()
-        transport = env("FLYING_DUTCHMAN_TRANSPORT")
+        transport = env("FLYING_DUTCHMAN_TRANSPORT")[0]
         logger.info("Who dares disturb the Flying Dutchman over %s?!", transport)
         if transport == "stdio":
             flyingdutchman.run(transport="stdio")
