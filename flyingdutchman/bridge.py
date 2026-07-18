@@ -1,6 +1,7 @@
 from . import flyingdutchman
 from dotenv import load_dotenv
 from flyingdutchman.captain import captain
+from flyingdutchman.navigator import navigator
 from flyingdutchman.powderboy import env, configure_logger
 
 import logging
@@ -9,6 +10,7 @@ def mount_subservers():
     logger = logging.getLogger(__name__)
     logger.debug("Mounting subservers...")
     flyingdutchman.mount(captain, "captain")
+    flyingdutchman.mount(navigator, "navigator")
     logger.debug("Subservers mounted successfully.")
 
 def main():

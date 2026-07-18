@@ -1,3 +1,3 @@
-from flyingdutchman.davyjones import main
+from flyingdutchman.bridge import main
 
 main()

@@ -40,6 +40,7 @@ def configure_logger(name: str, debug: bool = True) -> None:
         logging.Logger: Configured logger instance.
     """
     logger = logging.getLogger(name)
+    if logger.handlers: return
     logger.setLevel(logging.DEBUG if debug else logging.INFO)
     
     ch = logging.StreamHandler()
