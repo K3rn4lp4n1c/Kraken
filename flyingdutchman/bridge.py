@@ -20,12 +20,12 @@ def main():
     mount_subservers()
     try:
         if debug: load_dotenv()
-        transport, path = env("FLYING_DUTCHMAN_TRANSPORT,FLYING_DUTCHMAN_PATH")
+        transport = env("FLYING_DUTCHMAN_TRANSPORT")
         logger.info("Who dares disturb the Flying Dutchman over %s?!", transport)
         if transport == "stdio":
-            flyingdutchman.run(transport="stdio", path=path)
+            flyingdutchman.run(transport="stdio")
         elif transport == "http":
-            host, port = env("FLYING_DUTCHMAN_HOST,FLYING_DUTCHMAN_PORT", "127.0.0.1,8000")
+            host, port, path = env("FLYING_DUTCHMAN_HOST,FLYING_DUTCHMAN_PORT,FLYING_DUTCHMAN_PATH")
             flyingdutchman.run(transport="http", host=host, port=int(port), path=path)
         else: raise ValueError(f"Unsupported transport: {transport}")
     except Exception as e:
