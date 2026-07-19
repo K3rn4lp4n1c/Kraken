@@ -1,3 +1,4 @@
 from flyingdutchman.bridge import main
+from asyncio import run
 
-main()
+run(main())

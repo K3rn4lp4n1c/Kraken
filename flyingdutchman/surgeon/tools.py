@@ -1,16 +1,20 @@
 from dotenv import load_dotenv
-from flyingdutchman.powderboy import *
+from flyingdutchman.powderboy import configure_logger, env, sqlite3_connect
 from flyingdutchman import DB_DIRPATH
 from flyingdutchman.captain import triage as captain
-from flyingdutchman.navigator.tools import triage as navigator
+from flyingdutchman.navigator import triage as navigator
+from flyingdutchman.carpenter import playwright
+
+import logging
 
 async def _crew_checkup():
-    configure_logger(__name__, debug=True)
     logger = logging.getLogger(__name__)
     if not __debug__: logger.warning("Beware! Crew checkups while campaigning is not recommended.")
     load_dotenv()
     checklist: list[str] = []
     checks: list[bool] = []
+    id = "0" # NOTE: IDs are autoincremented as they come starting from 1, so use 0 for testing ;)
+    url = "https://architectural-presumptuously-jeanine.ngrok-free.dev/ctf" # Ngrok rocks! (for now)
 
     checklist.append("Database connection is successful")
     try:
@@ -29,14 +33,15 @@ async def _crew_checkup():
     checklist.extend(captain_result[0])
     checks.extend(captain_result[1])
 
-    navigator_result = await navigator()
+    await playwright.start()
+    navigator_result = await navigator(playwright, id, url)
     checklist.extend(navigator_result[0])
     checks.extend(navigator_result[1])
 
     return checklist, checks
 
 async def main():
-    configure_logger(__name__, debug=True)
+    configure_logger(debug=True)
     logger = logging.getLogger(__name__)
     checklist, checks = await _crew_checkup()
     for item, check in zip(checklist, checks):

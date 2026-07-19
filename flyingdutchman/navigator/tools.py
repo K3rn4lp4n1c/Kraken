@@ -2,22 +2,23 @@ from . import navigator
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlparse, urlsplit
-from playwright.async_api import async_playwright
 from flyingdutchman import DB_DIRPATH, HAR_DIRPATH
 from flyingdutchman.powderboy import *
+from flyingdutchman.carpenter import playwright, PlaywrightManager as PM
 
 import logging
 import hashlib
 
 CAMPAIGNS_DB_PATH = DB_DIRPATH / "chronicles.sqlite3"
 
-async def _scout_campaign(id: str, url: str, force: bool = False) -> tuple[bool, str, str]:
+async def _scout_campaign(p: PM, id: str, url: str, force: bool) -> tuple[bool, str, str]:
     """
     Records a HAR file for a given campaign by visiting the provided URL.
     If the HAR file already exists and force is set to True, it will overwrite the existing file.
     It also checks if the provided URL matches the expected domain for the campaign.
 
     Args:
+        p (PM): An instance of PlaywrightManager to manage the browser context.
         id (str): The ID of the campaign.
         url (str): The URL to visit for recording the HAR file.
         force (bool): If True, overwrite the existing HAR file if it exists. Default is False.
@@ -25,6 +26,7 @@ async def _scout_campaign(id: str, url: str, force: bool = False) -> tuple[bool,
         tuple[bool, str, str]:
         A tuple containing a success status, a message, and the HAR content (if successful).
     """
+    logger = logging.getLogger(__name__)
     try:
         campaigns_table = env("CAMPAIGNS_TABLE")[0]
         with sqlite3_connect(CAMPAIGNS_DB_PATH) as conn:
@@ -50,27 +52,21 @@ async def _scout_campaign(id: str, url: str, force: bool = False) -> tuple[bool,
                 har_content = har_file_path.read_text(encoding='utf-8')
                 return True, f"Campaign '{id}' already scouted at {m_time}.", har_content
             har_file_path.unlink(missing_ok=True)
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                browser_context_args: dict = {
+            browser_context_args: dict = {
                     "record_har_path": har_file_path,
                     "record_har_content": "embed", # NOTE: This is going to be a large one, hehe
                     "record_har_mode": "full", # NOTE: We want everything, no?
-                }
-                context = await browser.new_context(**browser_context_args)
-                try:
-                    page = await context.new_page()
-                    await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-                    await page.wait_for_timeout(5_000)
-                finally:
-                    await context.close()
-                    await browser.close()
-                if not har_file_path.exists():
-                    return False, f"Failed to record HAR file for campaign '{id}'.", ""
-                har_content = har_file_path.read_text(encoding='utf-8')
+            }
+            async with p.new_context(**browser_context_args) as context:
+                page = await context.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(5_000)
+            if not har_file_path.exists():
+                return False, f"Failed to record HAR file for campaign '{id}'.", ""
+            har_content = har_file_path.read_text(encoding='utf-8')
             return True, f"Campaign '{id}' scouted successfully.", har_content
     except Exception as e:
-        logging.exception("Error scouting campaign: %s", str(e))
+        logger.exception("Error scouting campaign: %s", str(e))
         return False, f"Internal Server Error in fetching campaigns", ""
 
 @navigator.tool()
@@ -88,20 +84,17 @@ async def scout_campaign(id: str, url: str, force: bool = False) -> dict:
         tuple[bool, str, str]:
         A tuple containing a success status, a message, and the HAR content (if successful).
     """
-    success, message, har_content = await _scout_campaign(id, url, force)
+    success, message, har_content = await _scout_campaign(playwright, id, url, force)
     return {"success": success, "message": message, "har_content": har_content}
 
-async def triage() -> tuple[list[str], list[bool]]:
-    configure_logger(__name__, debug=True)
+async def triage(playwright: PM, id: str, url: str) -> tuple[list[str], list[bool]]:
     logger = logging.getLogger(__name__)
     checklist: list[str] = []
     checks: list[bool] = []
-    # NOTE: Challenges are autoincremented as they are inserted starting from 1, so use 0 ;)
-    id, url = "1", "https://ctf.defsec.club"
 
     checklist.append("Scouting the campaign")
     try:
-        success, message, _ = await _scout_campaign(id, url)
+        success, message, _ = await _scout_campaign(playwright, id, url, True)
         if not success: raise Exception(message)
         checks.append(True)
     except Exception as e:

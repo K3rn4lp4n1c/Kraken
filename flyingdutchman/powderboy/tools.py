@@ -1,53 +1,31 @@
+from . import LOGGER_HANDLER_MARKER
 from pathlib import Path
-
+from flyingdutchman.carpenter import fancyFormatter
 import os
 import logging
 import sqlite3
 
-class _fancyFormatter(logging.Formatter):
-    """
-    Custom logging formatter to add colors and styles to log messages based on their severity level.
-    """
-    grey = "\x1b[38;21m"
-    yellow = "\x1b[33;21m"
-    red = "\x1b[31;21m"
-    bold_red = "\x1b[31;1m"
-    reset = "\x1b[0m"
-    fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-    FORMATS = {
-        logging.DEBUG: grey + fmt + reset,
-        logging.INFO: grey + fmt + reset,
-        logging.WARNING: yellow + fmt + reset,
-        logging.ERROR: red + fmt + reset,
-        logging.CRITICAL: bold_red + fmt + reset
-    }
 
-    def format(self, record):
-        log_fmt = self.FORMATS.get(record.levelno)
-        formatter = logging.Formatter(log_fmt)
-        return formatter.format(record)
-
-def configure_logger(name: str, debug: bool = True) -> None:
-    """
-    Configures and returns a logger with the specified name and debug level.
-
-    Args:
-        name (str): The name of the logger.
-        debug (bool): If True, sets the logger to DEBUG level; otherwise, INFO level.
-
-    Returns:
-        logging.Logger: Configured logger instance.
-    """
-    logger = logging.getLogger(name)
-    if logger.handlers: return
+def configure_logger(debug: bool = False) -> None:
+    logger = logging.getLogger("flyingdutchman")
     logger.setLevel(logging.DEBUG if debug else logging.INFO)
-    
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG if debug else logging.INFO)
-    ch.setFormatter(_fancyFormatter())
-    
-    logger.addHandler(ch)
+
+    # Prevent the same record from also reaching the root logger.
+    logger.propagate = False
+
+    # Do not install the same application handler more than once.
+    for existing_handler in logger.handlers:
+        if getattr(existing_handler, LOGGER_HANDLER_MARKER, False):
+            existing_handler.setLevel(logging.DEBUG if debug else logging.INFO)
+            return
+
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG if debug else logging.INFO)
+    formatter = fancyFormatter()
+    handler.setFormatter(formatter)
+    setattr(handler, LOGGER_HANDLER_MARKER, True)
+    logger.addHandler(handler)
 
 def env(keys: str, defaults: str = '', delimiter: str = ",") -> tuple[str, ...]:
     """

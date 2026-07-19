@@ -2,35 +2,38 @@ from . import flyingdutchman
 from dotenv import load_dotenv
 from flyingdutchman.captain import captain
 from flyingdutchman.navigator import navigator
-from flyingdutchman.powderboy import env, configure_logger
+from flyingdutchman.carpenter import playwright
+from flyingdutchman.powderboy import configure_logger, env
 
 import logging
 
-def mount_subservers():
+def _mount_subservers():
     logger = logging.getLogger(__name__)
     logger.debug("Mounting subservers...")
     flyingdutchman.mount(captain, "captain")
     flyingdutchman.mount(navigator, "navigator")
     logger.debug("Subservers mounted successfully.")
 
-def main():
+async def main():
     debug = True
-    configure_logger(__name__, debug=debug)
+    if debug: load_dotenv()
+    configure_logger(debug=debug)
     logger = logging.getLogger(__name__)
-    mount_subservers()
+    _mount_subservers()
     try:
-        if debug: load_dotenv()
+        await playwright.start()
         transport = env("FLYING_DUTCHMAN_TRANSPORT")[0]
         logger.info("Who dares disturb the Flying Dutchman over %s?!", transport)
         if transport == "stdio":
-            flyingdutchman.run(transport="stdio")
+            await flyingdutchman.run_async(transport="stdio")
         elif transport == "http":
             host, port, path = env("FLYING_DUTCHMAN_HOST,FLYING_DUTCHMAN_PORT,FLYING_DUTCHMAN_PATH")
-            flyingdutchman.run(transport="http", host=host, port=int(port), path=path)
+            await flyingdutchman.run_async(transport="http", host=host, port=int(port), path=path)
         else: raise ValueError(f"Unsupported transport: {transport}")
-    except Exception as e:
-        logger.exception(f"The Flying Dutchman shipwrecked: {e}")
     except KeyboardInterrupt:
         logger.info("The Flying Dutchman is docking...")
+    except Exception as e:
+        logger.exception(f"The Flying Dutchman shipwrecked: {e}")
     finally:
+        await playwright.stop()
         logger.info("The Flying Dutchman has docked.")

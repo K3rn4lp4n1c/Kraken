@@ -2,6 +2,8 @@ from . import captain
 from flyingdutchman import DB_DIRPATH
 from flyingdutchman.powderboy import *
 
+import logging
+
 CAMPAIGNS_DB_PATH = DB_DIRPATH / "chronicles.sqlite3"
 
 def _get_campaigns() -> tuple[bool, str, list[dict]]:
@@ -40,12 +42,11 @@ def get_campaigns() -> dict:
     return {"success": success, "message": message, "campaigns": campaigns }
 
 def triage() -> tuple[list[str], list[bool]]:
-    configure_logger(__name__)
     logger = logging.getLogger(__name__)
     checklist: list[str] = []
     checks: list[bool] = []
 
-    checklist.append("CAMPAIGNS_DB_PATH exists")
+    checklist.append("Campaigns database exists")
     checks.append(CAMPAIGNS_DB_PATH.exists())
 
     checklist.append("Campaigns Retrieval was successful")
