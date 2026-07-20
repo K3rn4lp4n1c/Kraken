@@ -33,7 +33,7 @@ def get_campaign_by_id(id: str) -> tuple[bool, str, Campaign | None]:
 def _get_campaigns() -> tuple[bool, str, list[dict]]:
     """
     Campaigns are CTF events that The Flying Dutchman has, can, or will participate in.
-    This function fetches the list of all campaigns (except that with id '0') from the database.
+    This function fetches the list of all campaigns from the database.
 
     Returns:
         tuple[bool, str, list[dict]]:
@@ -45,7 +45,7 @@ def _get_campaigns() -> tuple[bool, str, list[dict]]:
         with sqlite3_connect(DB_PATH) as conn:
             cursor = conn.cursor()
             fields = ["id", "name", "datetime", "url", "status"]
-            cursor.execute("SELECT {} FROM {} WHERE id <> 0".format(', '.join(fields), table_name))
+            cursor.execute("SELECT {} FROM {}".format(', '.join(fields), table_name))
             rows = cursor.fetchall()
             campaigns = [dict(zip(fields, row)) for row in rows]
             return True, "Campaigns fetched successfully.", campaigns
@@ -56,7 +56,7 @@ def _get_campaigns() -> tuple[bool, str, list[dict]]:
 def get_campaigns() -> dict:
     """
     Campaigns are CTF events that The Flying Dutchman has, can, or will participate in.
-    This tool fetches the list of all campaigns (except that with id '0') from the database.
+    This tool fetches the list of all campaigns from the database.
 
     Returns:
         dict: This will contain the success status, a message and the campaigns list.
@@ -146,6 +146,11 @@ async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ..
                             reqInit: dict = {}) -> dict:
     """
     Authenticates a running campaign and stores the authentication state in the its browser context.
+    Ensure the campaign is running before trying to authenticate it.
+    Also ensure that the provided URL matches the campaign's URL.
+    Credentials, fetched from a secure database, replace expected placeholders in the request body.
+    For example, if the body has "name={{name}}", {{name}} will be replaced with the actual value
+    There are no tools to insert campaigns or select credentials so this is safe
 
     Args:
         id (str): The ID of the campaign.

@@ -13,7 +13,10 @@ async def _scout_campaign(p: PM, id: str, url: str, force: bool,
     """
     Records a HAR file for a given campaign by visiting the provided URL.
     If the HAR file already exists and force is set to True, it will overwrite the existing file.
-    It also checks if the provided URL matches the expected domain for the campaign.
+    Ensure the provided URL matches the expected domain for the campaign.
+    There are no tools to insert campaigns or select credentials so this is safe.
+    Requests to the provided endpoints will be sent after visiting the URL in form of fetch requests
+    Responses will be recorded in the HAR file.
 
     Args:
         p (PM): An instance of PlaywrightManager to manage the browser context.
