@@ -47,7 +47,7 @@ class PlaywrightManager:
                 await playwright.stop()
 
     @asynccontextmanager
-    async def create_context_with_caller_as_owner(self, options: dict = {}) -> AsyncIterator[BrowserContext]:
+    async def create_context_with_caller_as_owner(self, **options) -> AsyncIterator[BrowserContext]:
         """Create and automatically close an isolated browser context."""
 
         browser = self._browser
@@ -62,12 +62,12 @@ class PlaywrightManager:
         finally:
             await context.close()
     
-    async def create_context_with_callee_as_owner(self, options: dict = {}) -> BrowserContext:
+    async def create_context_with_callee_as_owner(self, **options) -> BrowserContext:
         browser = self._browser
 
         if browser is None or not browser.is_connected():
             raise RuntimeError("PlaywrightManager has not been started")
-
+        
         return await browser.new_context(**options)
 
 class fancyFormatter(logging.Formatter):
