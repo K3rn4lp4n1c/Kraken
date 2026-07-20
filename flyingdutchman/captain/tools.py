@@ -1,5 +1,5 @@
 from . import captain
-from flyingdutchman import playwright, DB_PATH
+from flyingdutchman import DB_PATH
 from flyingdutchman.powderboy import *
 from flyingdutchman.carpenter.extensions import Campaign
 
