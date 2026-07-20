@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlite3 import Connection
 from urllib.parse import urlparse
 from dataclasses import dataclass, field
-from playwright.async_api import BrowserContext
+from playwright.async_api import BrowserContext, Page
 from flyingdutchman.powderboy import env, send_request, PlaywrightManager as PM
 
 import json
@@ -64,30 +64,34 @@ class Campaign:
         self._browser_context = await p.create_context_with_callee_as_owner(**options)
         self._update_status(conn, "running")
     
-    async def pause(self, conn: Connection, auth_path: Path) -> BrowserContext:
+    async def pause(self, conn: Connection, auth_path: Path | None = None) -> BrowserContext:
         if self._browser_context is None:
             raise ValueError("No browser context to pause. Perhaps start the campaign first")
-        state_path = auth_path / f"{self.id}.json"
-        await self._browser_context.storage_state(path=state_path)
+        if auth_path is not None:
+            state_path = auth_path / f"{self.id}.json"
+            await self._browser_context.storage_state(path=state_path)
         paused_context = self._browser_context
         self._browser_context = None
         self._update_status(conn, "paused")
         return paused_context
     
-    async def resume(self, conn: Connection, p: PM, auth_path: Path,
+    async def resume(self, conn: Connection, p: PM, auth_path: Path | None = None,
                     paused_context: BrowserContext | None = None,  **options) -> None:
         if self._browser_context is not None:
             raise ValueError("Browser context already running. Perhaps pause the campaign first")
-        state_path = auth_path / f"{self.id}.json"
         if paused_context is not None:
             self._browser_context = paused_context
-        elif not state_path.exists():
-            self._browser_context = await p.create_context_with_callee_as_owner(**options)
+        elif auth_path is not None:
+            state_path = auth_path / f"{self.id}.json"
+            if not state_path.exists():
+                self._browser_context = await p.create_context_with_callee_as_owner(**options)
+            else:
+                self._browser_context = await p.create_context_with_callee_as_owner(storage_state=state_path, **options)
         else:
-            self._browser_context = await p.create_context_with_callee_as_owner(storage_state=state_path, **options)
+            raise ValueError("Either auth_path or paused_context must be provided to resume the campaign")
         self._update_status(conn, "running")
 
-    async def authenticate(self, conn: Connection, auth_path: Path, url: str, expected_codes: tuple[int, ...], reqInit: dict = {}):
+    async def authenticate(self, conn: Connection, url: str, expected_codes: tuple[int, ...], reqInit: dict = {}):
         """
         Authenticate the campaign with a given browser context.
 
@@ -108,13 +112,19 @@ class Campaign:
             for key, value in credentials.items(): str(reqInit['body']).replace(f"{{{key}}}", value)
             if '{{{' in str(reqInit['body']) and '}}}' in str(reqInit['body']):
                 raise ValueError(f"Not all placeholders in body were filled: {reqInit['body']}")
-            page = await self._browser_context.new_page()
             if self._browser_context is None:
                 raise ValueError("No browser context provided. Perhaps restart the campaign")
             if urlparse(url).netloc != urlparse(self.url).netloc:
                 raise ValueError("The provided URL does not match the campaign's URL.")
+            page: Page | None = None
+            for p in self._browser_context.pages:
+                if p.url == url:
+                    if page is not None:
+                        raise ValueError(f"Multiple pages found with the same URL: {url}. Perhaps restart the campaign.")
+                    page = p
+            if page is None: page = await self._browser_context.new_page()
             resp = await send_request(page, url, reqInit)
             if resp["status"] not in expected_codes:
                 raise ValueError(f"Authentication failed ({resp['status']}), data: {resp['data']}")
-        await self._browser_context.storage_state(path=auth_path / f"{self.id}.json")
+        #await self._browser_context.storage_state(path=auth_path / f"{self.id}.json")
         self._authenticated = True
