@@ -9,6 +9,7 @@ class PlaywrightManager:
     def __init__(self) -> None:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
+        self._contexts: dict[str, BrowserContext] = {}
         self._lifecycle_lock = asyncio.Lock()
 
     async def start(self) -> None:
@@ -67,8 +68,24 @@ class PlaywrightManager:
 
         if browser is None or not browser.is_connected():
             raise RuntimeError("PlaywrightManager has not been started")
-        
         return await browser.new_context(**options)
+    
+    async def get_context(self, campaign_id: str) -> BrowserContext | None:
+        return self._contexts.get(campaign_id)
+    
+    async def set_context(self, campaign_id: str, context: BrowserContext) -> None:
+        if campaign_id in self._contexts:
+            # NOTE: They might be the same context
+            pages_url_of_old_context = [page.url for page in self._contexts[campaign_id].pages]
+            pages_url_of_new_context = [page.url for page in context.pages]
+            if pages_url_of_old_context != pages_url_of_new_context:
+                await self._contexts[campaign_id].close()
+        self._contexts[campaign_id] = context
+    
+    async def remove_context(self, campaign_id: str) -> None:
+        if campaign_id in self._contexts:
+            await self._contexts[campaign_id].close()
+            del self._contexts[campaign_id]
 
 class fancyFormatter(logging.Formatter):
     """
