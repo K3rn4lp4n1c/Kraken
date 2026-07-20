@@ -31,7 +31,11 @@ def get_campaign_by_id(conn: Connection, id: str) -> tuple[bool, str, Campaign |
             if row is None:
                 return False, f"No campaign found with id: {id}", None
             campaign_data = dict(zip(fields, row))
-            campaign = Campaign(auth_path=PLAYWRIGHT_AUTH_DIRPATH, **campaign_data)
+            campaign = Campaign(
+                **campaign_data,
+                playwright_manager=playwright,
+                auth_path=PLAYWRIGHT_AUTH_DIRPATH
+            )
             return True, "Campaign fetched successfully.", campaign
     except Exception as e:
         return False, f"Error fetching campaign by id: {str(e)}", None
@@ -87,7 +91,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, endpoints: 
             await send_request(page, endpoint, reqInit)
             await page.wait_for_timeout(1_000)
         await context.tracing.stop_har()
-        await campaign.resume(sqlite3_connect(DB_PATH), playwright, paused_context=context)
+        await campaign.resume(sqlite3_connect(DB_PATH), context)
         if not har_file_path.exists():
             return False, f"Failed to record HAR file for campaign '{id}'.", ""
         har_content = har_file_path.read_text(encoding='utf-8')

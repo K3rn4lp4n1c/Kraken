@@ -63,12 +63,10 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, **options
     try:
         if action == 'start':
             await campaign.start(sqlite3_connect(DB_PATH), playwright, **options)
-        elif action == 'pause':
-            await campaign.pause(sqlite3_connect(DB_PATH), PLAYWRIGHT_AUTH_DIRPATH)
-        elif action == 'resume':
-            await campaign.resume(sqlite3_connect(DB_PATH), playwright, PLAYWRIGHT_AUTH_DIRPATH, **options)
+        elif action == 'pause': await campaign.pause(sqlite3_connect(DB_PATH))
+        elif action == 'resume': await campaign.resume(sqlite3_connect(DB_PATH))
         elif action == 'stop': await campaign.stop(sqlite3_connect(DB_PATH))
-        elif action == 'restart': await campaign.restart(sqlite3_connect(DB_PATH), playwright, **options)
+        elif action == 'restart': await campaign.restart(sqlite3_connect(DB_PATH), **options)
         return True, f"{action} on Campaign '{campaign.id}' was successfully."
     except Exception as e:
         logger.exception("Error controlling campaign lifecycle: %s", str(e))
@@ -211,7 +209,7 @@ async def triage(id: str) -> tuple[Campaign | None, list[str], list[bool]]:
     try:
         if campaign is None: raise Exception("Campaign is None, cannot authenticate")
         if campaign.status != "running": raise Exception(f"Campaign status is not 'running', got '{campaign.status}'")
-        context = await campaign.pause(sqlite3_connect(DB_PATH), PLAYWRIGHT_AUTH_DIRPATH)
+        context = await campaign.pause(sqlite3_connect(DB_PATH))
         login_page = await context.new_page()
         login_url = campaign.url + "/login"
         await login_page.goto(login_url, wait_until="domcontentloaded", timeout=60_000)
@@ -221,7 +219,7 @@ async def triage(id: str) -> tuple[Campaign | None, list[str], list[bool]]:
         # print("Page URL:", login_page.url)
         # print("Page closed:", login_page.is_closed())
         # print("Matching nonce elements:", await nonce.count())
-        # print("All context pages:", [page.url for page in login_page.context.pages])
+        # print("All context pages:", [page.url for page in context.pages])
         # await login_page.screenshot(path=f"login_page_{id}.png", full_page=True)
         nonce_value = await nonce.input_value()
         reqInit = {
@@ -234,7 +232,7 @@ async def triage(id: str) -> tuple[Campaign | None, list[str], list[bool]]:
                 nonce_value=nonce_value
             )
         }
-        await campaign.resume(sqlite3_connect(DB_PATH), playwright, paused_context=context)
+        await campaign.resume(sqlite3_connect(DB_PATH), context)
         success, message = await _authenticate_campaign(campaign, login_url, (200,302), reqInit)
         if not success: raise Exception(message)
         checks.append(True)
