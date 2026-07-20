@@ -5,6 +5,31 @@ from flyingdutchman.carpenter.extensions import Campaign
 
 import logging
 
+def get_campaign_by_id(id: str) -> tuple[bool, str, Campaign | None]:
+    """
+    Fetches a campaign by its ID from the database.
+
+    Args:
+        id (str): The ID of the campaign to fetch.
+    Returns:
+        tuple[bool, str, Campaign | None]:
+        A tuple containing a success status, a message, and the Campaign object if found.
+    """
+    try:
+        table_name = env("CAMPAIGNS_TABLE")[0]
+        with sqlite3_connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            fields = ["id", "name", "datetime", "url", "status"]
+            cursor.execute("SELECT {} FROM {} WHERE id=?".format(', '.join(fields),table_name),(id,))
+            row = cursor.fetchone()
+            if row is None:
+                return False, f"No campaign found with id: {id}", None
+            campaign_data = dict(zip(fields, row))
+            campaign = Campaign(**campaign_data)
+            return True, "Campaign fetched successfully.", campaign
+    except Exception as e:
+        return False, f"Error fetching campaign by id: {str(e)}", None
+
 def _get_campaigns() -> tuple[bool, str, list[dict]]:
     """
     Campaigns are CTF events that The Flying Dutchman has, can, or will participate in.
@@ -39,31 +64,6 @@ def get_campaigns() -> dict:
     """
     success, message, campaigns = _get_campaigns()
     return {"success": success, "message": message, "campaigns": campaigns }
-
-def _get_campaign_by_id(id: str) -> tuple[bool, str, Campaign | None]:
-    """
-    Fetches a campaign by its ID from the database.
-
-    Args:
-        id (str): The ID of the campaign to fetch.
-    Returns:
-        tuple[bool, str, Campaign | None]:
-        A tuple containing a success status, a message, and the Campaign object if found.
-    """
-    try:
-        table_name = env("CAMPAIGNS_TABLE")[0]
-        with sqlite3_connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            fields = ["id", "name", "datetime", "url", "status"]
-            cursor.execute("SELECT {} FROM {} WHERE id=?".format(', '.join(fields),table_name),(id,))
-            row = cursor.fetchone()
-            if row is None:
-                return False, f"No campaign found with id: {id}", None
-            campaign_data = dict(zip(fields, row))
-            campaign = Campaign(**campaign_data)
-            return True, "Campaign fetched successfully.", campaign
-    except Exception as e:
-        return False, f"Error fetching campaign by id: {str(e)}", None
 
 async def _control_campaign_lifecycle(campaign: Campaign, action: str, options: dict = {}
                                     ) -> tuple[bool, str]:
@@ -113,7 +113,7 @@ async def control_campaign_lifecycle(id: str, action: str, options: dict) -> dic
     Returns:
         dict: Contains a success status and a message indicating the result of the operation.
     """
-    success, message, campaign = _get_campaign_by_id(id)
+    success, message, campaign = get_campaign_by_id(id)
     if not success or campaign is None:
         return {"success": False, "message": message, "status": "unknown"}
     success, message = await _control_campaign_lifecycle(campaign, action, **options)
@@ -156,7 +156,7 @@ async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ..
     Returns:
         dict: Contains a success status and a message indicating the result of the operation.
     """
-    success, message, campaign = _get_campaign_by_id(id)
+    success, message, campaign = get_campaign_by_id(id)
     if not success or campaign is None:
         return {"success": False, "message": message}
     success, message = await _authenticate_campaign(campaign, url, expected_codes, reqInit)
@@ -182,7 +182,7 @@ async def triage(id: str) -> tuple[list[str], list[bool]]:
     
     checklist.append("Campaigns Retrieval by ID was successful")
     try:
-        success, message, campaign = _get_campaign_by_id(id)
+        success, message, campaign = get_campaign_by_id(id)
         if not success or campaign is None: raise Exception(message)
         checks.append(True)
     except Exception as e:

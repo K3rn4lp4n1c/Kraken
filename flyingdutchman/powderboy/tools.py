@@ -1,6 +1,7 @@
 from . import LOGGER_HANDLER_MARKER
 from .extensions import fancyFormatter
 from pathlib import Path
+from playwright.async_api import Page
 import os
 import logging
 import sqlite3
@@ -60,3 +61,48 @@ def sqlite3_connect(path: Path) -> sqlite3.Connection:
     """
     conn = sqlite3.connect(path)
     return conn
+
+async def send_request(page: Page, url: str, reqInit: dict[str, dict|str] = {}) -> dict:
+        """
+        Send a request to the campaign's URL using the provided browser context.
+
+        Args:
+            url (str): The URL to send the request to.
+            reqInit (dict): Optional dictionary containing request initialization parameters.
+
+        Returns:
+            dict: A dictionary containing the response status and data.
+        """
+        await page.goto(url)
+        await page.wait_for_load_state("domcontentloaded")
+        response = await page.evaluate(
+        """
+        async ({ url, requestInit }) => {
+            try {
+                const response = await fetch(url, requestInit);
+                const text = await response.text();
+
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch {
+                    data = text;
+                }
+
+                return {
+                    status: response.status,
+                    url: response.url,
+                    ok: response.ok,
+                    data,
+                };
+            } catch (error) {
+                return {
+                    status: 500,
+                    data: {
+                        error: String(error),
+                    },
+                };
+            }
+        }
+        """, {"url": url, "requestInit": reqInit},)
+        return response

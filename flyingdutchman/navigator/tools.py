@@ -3,12 +3,13 @@ from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlparse, urlsplit
 from flyingdutchman import DB_PATH, HAR_DIRPATH, playwright, PlaywrightManager as PM
-from flyingdutchman.powderboy import *
+from flyingdutchman.powderboy import env, sqlite3_connect, send_request
 
 import logging
 import hashlib
 
-async def _scout_campaign(p: PM, id: str, url: str, force: bool) -> tuple[bool, str, str]:
+async def _scout_campaign(p: PM, id: str, url: str, force: bool,
+                        endpoints: list[tuple[str, dict]] = []) -> tuple[bool, str, str]:
     """
     Records a HAR file for a given campaign by visiting the provided URL.
     If the HAR file already exists and force is set to True, it will overwrite the existing file.
@@ -58,6 +59,9 @@ async def _scout_campaign(p: PM, id: str, url: str, force: bool) -> tuple[bool, 
                 page = await context.new_page()
                 await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
                 await page.wait_for_timeout(5_000)
+                for endpoint, reqInit in endpoints:
+                    await send_request(page, endpoint, reqInit)
+                    await page.wait_for_timeout(1_000)
             if not har_file_path.exists():
                 return False, f"Failed to record HAR file for campaign '{id}'.", ""
             har_content = har_file_path.read_text(encoding='utf-8')
@@ -67,7 +71,8 @@ async def _scout_campaign(p: PM, id: str, url: str, force: bool) -> tuple[bool, 
         return False, f"Internal Server Error in fetching campaigns", ""
 
 @navigator.tool()
-async def scout_campaign(id: str, url: str, force: bool = False) -> dict:
+async def scout_campaign(id: str, url: str, force: bool = False,
+                        endpoints: list[tuple[str, dict]] = [],) -> dict:
     """
     Records a HAR file for a given campaign by visiting the provided URL.
     If the HAR file already exists and force is set to True, it will overwrite the existing file.
@@ -77,11 +82,12 @@ async def scout_campaign(id: str, url: str, force: bool = False) -> dict:
         id (str): The ID of the campaign.
         url (str): The URL to visit for recording the HAR file.
         force (bool): If True, overwrite the existing HAR file if it exists. Default is False.
+        endpoints (Optional(list[tuple[str, dict]])): A list of tuples with endpoint URLs and their corresponding request initialization parameters. Default is an empty list.
     Returns:
         tuple[bool, str, str]:
         A tuple containing a success status, a message, and the HAR content (if successful).
     """
-    success, message, har_content = await _scout_campaign(playwright, id, url, force)
+    success, message, har_content = await _scout_campaign(playwright, id, url, force, endpoints)
     return {"success": success, "message": message, "har_content": har_content}
 
 async def triage(playwright: PM, id: str, url: str) -> tuple[list[str], list[bool]]:
@@ -91,7 +97,7 @@ async def triage(playwright: PM, id: str, url: str) -> tuple[list[str], list[boo
 
     checklist.append("Scouting the campaign")
     try:
-        success, message, _ = await _scout_campaign(playwright, id, url, True)
+        success, message, _ = await _scout_campaign(playwright, id, url, True, [(url, {})])
         if not success: raise Exception(message)
         checks.append(True)
     except Exception as e:
