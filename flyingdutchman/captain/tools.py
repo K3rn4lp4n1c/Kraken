@@ -137,6 +137,9 @@ async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ..
     Credentials, fetched from a secure database, replace expected placeholders in the request body.
     For example, if the body has "name={{name}}", {{name}} will be replaced with the actual value
     There are no tools to insert campaigns or select credentials
+    Fields in the request body that can be replaced are user-controlled fields like name and password
+    Fields like nonce, csrf, and tokens are not replaced.
+    Refer to `scout_campaign` for a more complete example of how to handle these fields.
 
     Args:
         id (str): The ID of the campaign.
