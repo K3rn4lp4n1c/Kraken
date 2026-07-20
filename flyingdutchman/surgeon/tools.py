@@ -3,6 +3,7 @@ from flyingdutchman import playwright, DB_PATH
 from flyingdutchman.powderboy import configure_logger, env, sqlite3_connect
 from flyingdutchman.captain import triage as captain
 from flyingdutchman.navigator import triage as navigator
+from flyingdutchman.carpenter.extensions import Campaign
 
 import logging
 
@@ -15,6 +16,9 @@ async def _crew_checkup():
     id = "0" # NOTE: IDs are autoincremented as they come starting from 1, so use 0 for testing ;)
     url = "https://architectural-presumptuously-jeanine.ngrok-free.dev/ctf" # Ngrok rocks! (for now)
     initial_campaign: dict | None = None
+    campaign: Campaign | None = None
+
+    await playwright.start()
 
     checklist.append("Database connection is successful")
     try:
@@ -39,11 +43,17 @@ async def _crew_checkup():
             return checklist, checks
 
     captain_result = await captain(id)
-    checklist.extend(captain_result[0])
-    checks.extend(captain_result[1])
+    campaign = captain_result[0]
+    checklist.extend(captain_result[1])
+    checks.extend(captain_result[2])
+    
+    checklist.append("Campaign object is valid")
+    if campaign is None:
+        checks.append(False)
+        return checklist, checks
+    else: checks.append(True)
 
-    await playwright.start()
-    navigator_result = await navigator(playwright, id, url)
+    navigator_result = await navigator(campaign, url)
     checklist.extend(navigator_result[0])
     checks.extend(navigator_result[1])
 

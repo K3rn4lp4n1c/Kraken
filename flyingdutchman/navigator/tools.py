@@ -3,7 +3,8 @@ from pathlib import Path
 from datetime import datetime
 from sqlite3 import Connection
 from urllib.parse import urlparse, urlsplit
-from flyingdutchman import DB_PATH, HAR_DIRPATH, playwright, PlaywrightManager as PM
+from playwright.async_api import Page
+from flyingdutchman import DB_PATH, HAR_DIRPATH, playwright
 from flyingdutchman.carpenter.extensions import Campaign
 from flyingdutchman.powderboy import env, sqlite3_connect, send_request
 
@@ -35,8 +36,7 @@ def get_campaign_by_id(conn: Connection, id: str) -> tuple[bool, str, Campaign |
     except Exception as e:
         return False, f"Error fetching campaign by id: {str(e)}", None
 
-async def _scout_campaign(p: PM, id: str, url: str, force: bool,
-                        endpoints: list[tuple[str, dict]] = []) -> tuple[bool, str, str]:
+async def _scout_campaign(campaign: Campaign, url: str, force: bool, endpoints: list[tuple[str, dict]] = []) -> tuple[bool, str, str]:
     """
     Records a HAR file for a given campaign by visiting the provided URL.
     If the HAR file already exists and force is set to True, it will overwrite the existing file.
@@ -58,46 +58,40 @@ async def _scout_campaign(p: PM, id: str, url: str, force: bool,
     """
     logger = logging.getLogger(__name__)
     try:
-        campaigns_table = env("CAMPAIGNS_TABLE")[0]
-        with sqlite3_connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            query = "SELECT url from {} WHERE id = ?".format(campaigns_table)
-            cursor.execute(query, (id,))
-            row = cursor.fetchone()
-            if row is None:
-                return False, f"No campaign found with id: {id}", ""
-            exp_url = row[0]
-            if not isinstance(exp_url, str) or not exp_url:
-                return False, f"Invalid URL for campaign id: {id}", ""
-            parsed_url = urlparse(url)
-            if parsed_url.netloc != urlsplit(exp_url).netloc:
-                return False, f"'{url}' does not match expected domain for campaign id: {id}", ""
-            har_dir = HAR_DIRPATH / id
-            har_path = hashlib.md5(parsed_url.geturl().encode()).hexdigest() + ".har"
-            Path.mkdir(har_dir, parents=True, exist_ok=True)
-            har_file_path = har_dir / har_path
-            if har_file_path.exists() and not force:
-                m_timestamp = har_file_path.stat().st_mtime
-                m_time = datetime.fromtimestamp(m_timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                har_content = har_file_path.read_text(encoding='utf-8')
-                return True, f"Campaign '{id}' already scouted at {m_time}.", har_content
-            har_file_path.unlink(missing_ok=True)
-            browser_context_args: dict = {
-                    "record_har_path": har_file_path,
-                    "record_har_content": "embed", # NOTE: This is going to be a large one, hehe
-                    "record_har_mode": "full", # NOTE: We want everything, no?
-            }
-            async with p.create_context_with_caller_as_owner(**browser_context_args) as context:
-                page = await context.new_page()
-                await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-                await page.wait_for_timeout(5_000)
-                for endpoint, reqInit in endpoints:
-                    await send_request(page, endpoint, reqInit)
-                    await page.wait_for_timeout(1_000)
-            if not har_file_path.exists():
-                return False, f"Failed to record HAR file for campaign '{id}'.", ""
+        parsed_url = urlparse(url)
+        if parsed_url.netloc != urlsplit(campaign.url).netloc:
+            return False, f"'{url}' does not match expected domain for campaign id: {id}", ""
+        har_dir = HAR_DIRPATH / str(campaign.id)
+        har_path = hashlib.md5(parsed_url.geturl().encode()).hexdigest() + ".har"
+        Path.mkdir(har_dir, parents=True, exist_ok=True)
+        har_file_path = har_dir / har_path
+        if har_file_path.exists() and not force:
+            m_timestamp = har_file_path.stat().st_mtime
+            m_time = datetime.fromtimestamp(m_timestamp).strftime('%Y-%m-%d %H:%M:%S')
             har_content = har_file_path.read_text(encoding='utf-8')
-            return True, f"Campaign '{id}' scouted successfully.", har_content
+            return True, f"Campaign '{id}' already scouted at {m_time}.", har_content
+        har_file_path.unlink(missing_ok=True)
+        context = await campaign.pause(sqlite3_connect(DB_PATH))
+        page: Page | None = None
+        for p in context.pages:
+            if p.url == url:
+                if page is not None:
+                    raise ValueError(f"Multiple pages found with the same URL: {url}. Perhaps restart the campaign.")
+                page = p
+        if page is None:
+            page = await context.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        await page.wait_for_timeout(5_000)
+        await context.tracing.start_har(har_file_path, mode="full", content="embed")
+        for endpoint, reqInit in endpoints:
+            await send_request(page, endpoint, reqInit)
+            await page.wait_for_timeout(1_000)
+        await context.tracing.stop_har()
+        await campaign.resume(sqlite3_connect(DB_PATH), playwright, paused_context=context)
+        if not har_file_path.exists():
+            return False, f"Failed to record HAR file for campaign '{id}'.", ""
+        har_content = har_file_path.read_text(encoding='utf-8')
+        return True, f"Campaign '{id}' scouted successfully.", har_content
     except Exception as e:
         logger.exception("Error scouting campaign: %s", str(e))
         return False, f"Internal Server Error in fetching campaigns", ""
@@ -119,17 +113,20 @@ async def scout_campaign(id: str, url: str, force: bool = False,
         tuple[bool, str, str]:
         A tuple containing a success status, a message, and the HAR content (if successful).
     """
-    success, message, har_content = await _scout_campaign(playwright, id, url, force, endpoints)
+    campaign = get_campaign_by_id(sqlite3_connect(DB_PATH), id)[2]
+    if campaign is None:
+        return {"success": False, "message": f"No campaign found with id: {id}", "har_content": ""}
+    success, message, har_content = await _scout_campaign(campaign, url, force, endpoints)
     return {"success": success, "message": message, "har_content": har_content}
 
-async def triage(playwright: PM, id: str, url: str) -> tuple[list[str], list[bool]]:
+async def triage(campaign: Campaign, url: str) -> tuple[list[str], list[bool]]:
     logger = logging.getLogger(__name__)
     checklist: list[str] = []
     checks: list[bool] = []
 
     checklist.append("Scouting the campaign")
     try:
-        success, message, _ = await _scout_campaign(playwright, id, url, True, [(url, {})])
+        success, message, _ = await _scout_campaign(campaign, url, True, [(url, {})])
         if not success: raise Exception(message)
         checks.append(True)
     except Exception as e:

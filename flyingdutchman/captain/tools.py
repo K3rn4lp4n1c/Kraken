@@ -113,7 +113,7 @@ async def _authenticate_campaign(campaign: Campaign, url: str, expected_codes: t
     """
     logger = logging.getLogger(__name__)
     try:
-        await campaign.authenticate(sqlite3_connect(DB_PATH), PLAYWRIGHT_AUTH_DIRPATH, url, expected_codes, reqInit)
+        await campaign.authenticate(sqlite3_connect(DB_PATH), url, expected_codes, reqInit)
         return True, f"Campaign '{campaign.id}' authenticated successfully."
     except Exception as e:
         logger.exception("Error authenticating campaign: %s", str(e))
@@ -145,7 +145,7 @@ async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ..
     success, message = await _authenticate_campaign(campaign, url, expected_codes, reqInit)
     return {"success": success, "message": message}
 
-async def triage(id: str) -> tuple[list[str], list[bool]]:
+async def triage(id: str) -> tuple[Campaign | None, list[str], list[bool]]:
     logger = logging.getLogger(__name__)
     checklist: list[str] = []
     checks: list[bool] = []
@@ -224,11 +224,11 @@ async def triage(id: str) -> tuple[list[str], list[bool]]:
                 nonce_value=nonce_value
             )
         }
-        await campaign.resume(sqlite3_connect(DB_PATH), playwright, PLAYWRIGHT_AUTH_DIRPATH, paused_context=context)
+        await campaign.resume(sqlite3_connect(DB_PATH), playwright, paused_context=context)
         success, message = await _authenticate_campaign(campaign, login_url, (200,302), reqInit)
         if not success: raise Exception(message)
         checks.append(True)
     except Exception as e:
         checks.append(False)
         logger.exception("Error authenticating campaign: %s", str(e))
-    return checklist, checks
+    return campaign, checklist, checks
