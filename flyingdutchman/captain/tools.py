@@ -69,11 +69,11 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, options: 
                                     ) -> tuple[bool, str]:
     """
     Controls the lifecycle of a campaign. The following actions are supported:
-    - 'start': Starts the campaign. Options is passed up to campaign's browser context creation
+    - 'start': Starts the campaign. Options is passed up to its browser context creation
     - 'pause': Pauses the campaign. No options are needed.
-    - 'resume': Resumes the campaign. Options is passed up to campaign's browser context creation
+    - 'resume': Resumes the campaign. Options is passed up to its browser context creation
     - 'stop': Stops the campaign. No options are needed.
-    - 'restart': Restarts the campaign. Options is passed up to campaign's browser context creation
+    - 'restart': Restarts the campaign. Options is passed up to its browser context creation
 
     Args:
         id (str): The ID of the campaign.
@@ -100,11 +100,11 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, options: 
 async def control_campaign_lifecycle(id: str, action: str, options: dict) -> dict:
     """
     Controls the lifecycle of a campaign. The following actions are supported:
-    - 'start': Starts the campaign. Options is passed up to campaign's browser context creation
+    - 'start': Starts the campaign. Options is passed up to its browser context creation
     - 'pause': Pauses the campaign. No options are needed.
-    - 'resume': Resumes the campaign. Options is passed up to campaign's browser context creation
+    - 'resume': Resumes the campaign. Options is passed up to its browser context creation
     - 'stop': Stops the campaign. No options are needed.
-    - 'restart': Restarts the campaign. Options is passed up to campaign's browser context creation
+    - 'restart': Restarts the campaign. Options is passed up to its browser context creation
 
     Args:
         id (str): The ID of the campaign.
@@ -145,13 +145,14 @@ async def _authenticate_campaign(campaign: Campaign, url: str, expected_codes: t
 async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ...],
                             reqInit: dict = {}) -> dict:
     """
-    Authenticates a campaign with a given browser context.
+    Authenticates a running campaign and stores the authentication state in the its browser context.
 
     Args:
         id (str): The ID of the campaign.
         url (str): The URL to send the authentication request to.
         expected_codes (tuple[int, ...]): A tuple of expected HTTP status codes for a successful request.
         reqInit (dict): Optional dictionary containing request initialization parameters.
+
     Returns:
         dict: Contains a success status and a message indicating the result of the operation.
     """
