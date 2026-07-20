@@ -92,17 +92,25 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, endpoints: 
             return False, f"Failed to record HAR file for campaign '{id}'.", ""
         har_content = har_file_path.read_text(encoding='utf-8')
         return True, f"Campaign '{id}' scouted successfully.", har_content
+    except ValueError as ve:
+        logger.error("Error while scouting campaign: %s", str(ve))
+        return False, f"Error: {str(ve)}", ""
     except Exception as e:
-        logger.exception("Error scouting campaign: %s", str(e))
+        logger.exception("Error while scouting campaign: %s", str(e))
         return False, f"Internal Server Error in fetching campaigns", ""
 
 @navigator.tool()
-async def scout_campaign(id: str, url: str, force: bool = False,
-                        endpoints: list[tuple[str, dict]] = [],) -> dict:
+async def scout_campaign(id: str, url: str, force: bool = False, endpoints: list[tuple[str, dict]] = []) -> dict:
     """
     Records a HAR file for a given campaign by visiting the provided URL.
     If the HAR file already exists and force is set to True, it will overwrite the existing file.
     It also checks if the provided URL matches the expected domain for the campaign.
+    If a page with the provided URL exists in the campaign's browser context, it will use that page.
+    Otherwise, it will create a new page. Multiple pages with the same URL will raise an error.
+    There are no tools to insert campaigns or select credentials so this is safe.
+    Requests to the provided endpoints will be sent after visiting the URL in form of fetch requests.
+    Responses will be recorded in a HAR file whose filename is a hash of the URL.
+    The HAR file will be stored in a directory named after the campaign ID.
 
     Args:
         id (str): The ID of the campaign.

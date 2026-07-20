@@ -115,6 +115,9 @@ async def _authenticate_campaign(campaign: Campaign, url: str, expected_codes: t
     try:
         await campaign.authenticate(sqlite3_connect(DB_PATH), url, expected_codes, reqInit)
         return True, f"Campaign '{campaign.id}' authenticated successfully."
+    except ValueError as ve:
+        logger.error("Error authenticating campaign: %s", str(ve))
+        return False, f"Error: {str(ve)}"
     except Exception as e:
         logger.exception("Error authenticating campaign: %s", str(e))
         return False, f"Internal Server Error in authenticating campaign"
@@ -124,6 +127,9 @@ async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ..
                             reqInit: dict = {}) -> dict:
     """
     Authenticates a running campaign and stores the authentication state in the its browser context.
+    It uses the login page with the provided url if it exists in the browser context
+    or creates a new page if it doesn't.
+    The page and browser context remain open after this operation.
     Ensure the campaign is running before trying to authenticate it.
     Also ensure that the provided URL matches the campaign's URL.
     Credentials, fetched from a secure database, replace expected placeholders in the request body.
