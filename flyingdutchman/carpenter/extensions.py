@@ -26,9 +26,22 @@ class Campaign:
     url: str
     status: str
     datetime: datetime
+    auth_path: Path
     challenges: list[Challenge] = field(default_factory=list)
     _authenticated: bool = field(default=False, init=False)
     _browser_context: BrowserContext | None = field(default=None, init=False)
+
+    async def _save_state(self) -> None:
+        """
+        Save the state of the campaign's browser context to a file.
+
+        Args:
+            auth_path (Path): The path to the directory where the state file will be saved.
+        """
+        if self._browser_context is None:
+            raise ValueError("No browser context to save. Perhaps start the campaign first")
+        state_path = self.auth_path / f"{self.id}.json"
+        await self._browser_context.storage_state(path=state_path)
     
     def _update_status(self, conn: Connection, new_status: str) -> None:
         """
@@ -48,7 +61,10 @@ class Campaign:
         if self._browser_context is not None:
             raise ValueError("Browser context already started. Perhaps restart the campaign")
         self._browser_context = await p.create_context_with_callee_as_owner(**options)
+        if self._browser_context is None:
+            raise ValueError("Failed to create a browser context")
         self._update_status(conn, "running")
+        await self._save_state()
         
     async def stop(self, conn: Connection) -> None:
         if self._browser_context is None:
@@ -56,13 +72,17 @@ class Campaign:
         await self._browser_context.close()
         self._browser_context = None
         self._update_status(conn, "stopped")
+        await self._save_state()
     
     async def restart(self, conn: Connection, p: PM, **options) -> None:
         if self._browser_context is not None:
             await self._browser_context.close()
             self._browser_context = None
         self._browser_context = await p.create_context_with_callee_as_owner(**options)
+        if self._browser_context is None:
+            raise ValueError("Failed to create a browser context")
         self._update_status(conn, "running")
+        await self._save_state()
     
     async def pause(self, conn: Connection, auth_path: Path | None = None) -> BrowserContext:
         if self._browser_context is None:
@@ -73,6 +93,7 @@ class Campaign:
         paused_context = self._browser_context
         self._browser_context = None
         self._update_status(conn, "paused")
+        await self._save_state()
         return paused_context
     
     async def resume(self, conn: Connection, p: PM, auth_path: Path | None = None,
@@ -90,6 +111,7 @@ class Campaign:
         else:
             raise ValueError("Either auth_path or paused_context must be provided to resume the campaign")
         self._update_status(conn, "running")
+        await self._save_state()
 
     async def authenticate(self, conn: Connection, url: str, expected_codes: tuple[int, ...], reqInit: dict = {}):
         """
@@ -127,4 +149,4 @@ class Campaign:
             if resp["status"] not in expected_codes:
                 raise ValueError(f"Authentication failed ({resp['status']}), data: {resp['data']}")
         #await self._browser_context.storage_state(path=auth_path / f"{self.id}.json")
-        self._authenticated = True
+        await self._save_state()

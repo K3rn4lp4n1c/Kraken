@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlite3 import Connection
 from urllib.parse import urlparse, urlsplit
 from playwright.async_api import Page
-from flyingdutchman import DB_PATH, HAR_DIRPATH, playwright
+from flyingdutchman import playwright, DB_PATH, HAR_DIRPATH, PLAYWRIGHT_AUTH_DIRPATH
 from flyingdutchman.carpenter.extensions import Campaign
 from flyingdutchman.powderboy import env, sqlite3_connect, send_request
 
@@ -31,7 +31,7 @@ def get_campaign_by_id(conn: Connection, id: str) -> tuple[bool, str, Campaign |
             if row is None:
                 return False, f"No campaign found with id: {id}", None
             campaign_data = dict(zip(fields, row))
-            campaign = Campaign(**campaign_data)
+            campaign = Campaign(auth_path=PLAYWRIGHT_AUTH_DIRPATH, **campaign_data)
             return True, "Campaign fetched successfully.", campaign
     except Exception as e:
         return False, f"Error fetching campaign by id: {str(e)}", None
