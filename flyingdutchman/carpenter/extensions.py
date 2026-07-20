@@ -3,8 +3,8 @@ from datetime import datetime
 from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from flyingdutchman import playwright, DB_PATH, PLAYWRIGHT_AUTH_DIRPATH
-from flyingdutchman.powderboy import *
-from playwright.async_api import BrowserContext, Page
+from flyingdutchman.powderboy import env, sqlite3_connect, send_request
+from playwright.async_api import BrowserContext
 
 import json
 
@@ -28,56 +28,6 @@ class Campaign:
     challenges: list[Challenge] = field(default_factory=list)
     _authenticated: bool = field(default=False, init=False)
     _browser_context: BrowserContext | None = field(default=None, init=False)
-
-    async def _send_request(self, page: Page, url: str, reqInit: dict[str, dict|str] = {}) -> dict:
-        """
-        Send a request to the campaign's URL using the provided browser context.
-
-        Args:
-            url (str): The URL to send the request to.
-            reqInit (dict): Optional dictionary containing request initialization parameters.
-
-        Returns:
-            dict: A dictionary containing the response status and data.
-        """
-        if self._browser_context is None:
-            raise ValueError("No browser context provided. Perhaps restart the campaign")
-        if urlparse(url).netloc != urlparse(self.url).netloc:
-            raise ValueError("The provided URL does not match the campaign's URL.")
-        
-        await page.goto(url)
-        await page.wait_for_load_state("domcontentloaded")
-        response = await page.evaluate(
-        """
-        async ({ url, requestInit }) => {
-            try {
-                const response = await fetch(url, requestInit);
-                const text = await response.text();
-
-                let data;
-                try {
-                    data = JSON.parse(text);
-                } catch {
-                    data = text;
-                }
-
-                return {
-                    status: response.status,
-                    url: response.url,
-                    ok: response.ok,
-                    data,
-                };
-            } catch (error) {
-                return {
-                    status: 500,
-                    data: {
-                        error: String(error),
-                    },
-                };
-            }
-        }
-        """, {"url": url, "requestInit": reqInit},)
-        return response
     
     def _update_status(self, new_status: str) -> None:
         """
@@ -163,7 +113,11 @@ class Campaign:
             if '{{{' in str(reqInit['body']) and '}}}' in str(reqInit['body']):
                 raise ValueError(f"Not all placeholders in body were filled: {reqInit['body']}")
             page = await self._browser_context.new_page()
-            resp = await self._send_request(page, url, reqInit)
+            if self._browser_context is None:
+                raise ValueError("No browser context provided. Perhaps restart the campaign")
+            if urlparse(url).netloc != urlparse(self.url).netloc:
+                raise ValueError("The provided URL does not match the campaign's URL.")
+            resp = await send_request(page, url, reqInit)
             if resp["status"] not in expected_codes:
                 raise ValueError(f"Authentication failed ({resp['status']}), data: {resp['data']}")
         await self._browser_context.storage_state(path=PLAYWRIGHT_AUTH_DIRPATH / f"{self.id}.json")
