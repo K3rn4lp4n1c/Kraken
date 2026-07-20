@@ -50,8 +50,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, endpoints: 
     Responses will be recorded in the HAR file.
 
     Args:
-        p (PM): An instance of PlaywrightManager to manage the browser context.
-        id (str): The ID of the campaign.
+        campaign (Campaign): The Campaign object for which to record the HAR file.
         url (str): The URL to visit for recording the HAR file.
         force (bool): If True, overwrite the existing HAR file if it exists. Default is False.
         endpoints (Optional(list[tuple[str, dict]])): A list of tuples with endpoint URLs and their corresponding request initialization parameters. Default is an empty list.
@@ -77,6 +76,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, endpoints: 
         har_file_path.unlink(missing_ok=True)
         context = await campaign.pause(sqlite3_connect(DB_PATH))
         page: Page | None = None
+        await context.tracing.start_har(har_file_path, mode="full", content="embed")
         for p in context.pages:
             if p.url == url:
                 if page is not None:
@@ -86,7 +86,6 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, endpoints: 
             page = await context.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
         await page.wait_for_timeout(5_000)
-        await context.tracing.start_har(har_file_path, mode="full", content="embed")
         for endpoint, reqInit in endpoints:
             await send_request(page, endpoint, reqInit)
             await page.wait_for_timeout(1_000)
