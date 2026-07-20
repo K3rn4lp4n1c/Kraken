@@ -41,7 +41,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, endpoints: 
     Records a HAR file for a given campaign by visiting the provided URL.
     If the HAR file already exists and force is set to True, it will overwrite the existing file.
     Ensure the provided URL matches the expected domain for the campaign.
-    There are no tools to insert campaigns or select credentials so this is safe.
+    There are no tools to insert campaigns or select credentials.
     Requests to the provided endpoints will be sent after visiting the URL in form of fetch requests
     Responses will be recorded in the HAR file.
 

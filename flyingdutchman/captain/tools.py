@@ -69,7 +69,7 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, **options
             await campaign.resume(sqlite3_connect(DB_PATH), playwright, PLAYWRIGHT_AUTH_DIRPATH, **options)
         elif action == 'stop': await campaign.stop(sqlite3_connect(DB_PATH))
         elif action == 'restart': await campaign.restart(sqlite3_connect(DB_PATH), playwright, **options)
-        return True, f"Campaign '{id}' {action}ed successfully."
+        return True, f"{action} on Campaign '{campaign.id}' was successfully."
     except Exception as e:
         logger.exception("Error controlling campaign lifecycle: %s", str(e))
         return False, f"Internal Server Error in controlling campaign lifecycle"
@@ -83,6 +83,10 @@ async def control_campaign_lifecycle(id: str, action: str, options: dict) -> dic
     - 'resume': Resumes the campaign. Options is passed up to its browser context creation
     - 'stop': Stops the campaign. No options are needed.
     - 'restart': Restarts the campaign. Options is passed up to its browser context creation
+    For 'pause' and 'resume', browser context state can be saved to and restored from a file.
+    By default, the contexts are returned as unserializable `BrowserContext` objects.
+    Calls to this tool will not return objects that cannot be serialized to JSON.
+    However, the tool will save the context to disk in the form `{campaign_id}.json` in the designated auth directory.
 
     Args:
         id (str): The ID of the campaign.
@@ -134,7 +138,7 @@ async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ..
     Also ensure that the provided URL matches the campaign's URL.
     Credentials, fetched from a secure database, replace expected placeholders in the request body.
     For example, if the body has "name={{name}}", {{name}} will be replaced with the actual value
-    There are no tools to insert campaigns or select credentials so this is safe
+    There are no tools to insert campaigns or select credentials
 
     Args:
         id (str): The ID of the campaign.
