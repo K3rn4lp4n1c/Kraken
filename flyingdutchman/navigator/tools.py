@@ -2,14 +2,11 @@ from . import navigator
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlparse, urlsplit
-from flyingdutchman import DB_DIRPATH, HAR_DIRPATH
+from flyingdutchman import DB_PATH, HAR_DIRPATH, playwright, PlaywrightManager as PM
 from flyingdutchman.powderboy import *
-from flyingdutchman.carpenter import playwright, PlaywrightManager as PM
 
 import logging
 import hashlib
-
-CAMPAIGNS_DB_PATH = DB_DIRPATH / "chronicles.sqlite3"
 
 async def _scout_campaign(p: PM, id: str, url: str, force: bool) -> tuple[bool, str, str]:
     """
@@ -29,7 +26,7 @@ async def _scout_campaign(p: PM, id: str, url: str, force: bool) -> tuple[bool, 
     logger = logging.getLogger(__name__)
     try:
         campaigns_table = env("CAMPAIGNS_TABLE")[0]
-        with sqlite3_connect(CAMPAIGNS_DB_PATH) as conn:
+        with sqlite3_connect(DB_PATH) as conn:
             cursor = conn.cursor()
             query = "SELECT url from {} WHERE id = ?".format(campaigns_table)
             cursor.execute(query, (id,))
@@ -57,7 +54,7 @@ async def _scout_campaign(p: PM, id: str, url: str, force: bool) -> tuple[bool, 
                     "record_har_content": "embed", # NOTE: This is going to be a large one, hehe
                     "record_har_mode": "full", # NOTE: We want everything, no?
             }
-            async with p.new_context(**browser_context_args) as context:
+            async with p.create_context_with_caller_as_owner(browser_context_args) as context:
                 page = await context.new_page()
                 await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
                 await page.wait_for_timeout(5_000)

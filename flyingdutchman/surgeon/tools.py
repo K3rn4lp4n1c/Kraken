@@ -1,9 +1,8 @@
 from dotenv import load_dotenv
+from flyingdutchman import playwright, DB_PATH
 from flyingdutchman.powderboy import configure_logger, env, sqlite3_connect
-from flyingdutchman import DB_DIRPATH
 from flyingdutchman.captain import triage as captain
 from flyingdutchman.navigator import triage as navigator
-from flyingdutchman.carpenter import playwright
 
 import logging
 
@@ -15,21 +14,31 @@ async def _crew_checkup():
     checks: list[bool] = []
     id = "0" # NOTE: IDs are autoincremented as they come starting from 1, so use 0 for testing ;)
     url = "https://architectural-presumptuously-jeanine.ngrok-free.dev/ctf" # Ngrok rocks! (for now)
+    initial_campaign: dict | None = None
 
     checklist.append("Database connection is successful")
     try:
-        test_db_path = DB_DIRPATH / "test.sqlite3"
-        with sqlite3_connect(test_db_path) as conn:
+        campaigns_table = env("CAMPAIGNS_TABLE")[0]
+        with sqlite3_connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT 1")
+            cursor.execute("SELECT * FROM {} WHERE id = ?".format(campaigns_table), (id,))
             result = cursor.fetchone()
-            if result is not None and result[0] == 1: checks.append(True)
-            else: checks.append(False)
-    except Exception as e:
+            if result is not None and str(result[0]) == id:
+                initial_campaign = dict(zip([column[0] for column in cursor.description], result))
+                initial_campaign.pop("id", None)
+                checks.append(True)
+            else:
+                logger.error(f"No campaign found with id: {id} {result}")
+                checks.append(False)
+    except Exception:
         checks.append(False)
-        print(f"Database connection failed: {e}")
-    
-    captain_result = captain()
+        logger.exception(f"Database connection failed")
+    finally:
+        if initial_campaign is None:
+            logger.error(f"Initial campaign state could not be fetched for id: {id}.")
+            return checklist, checks
+
+    captain_result = await captain(id)
     checklist.extend(captain_result[0])
     checks.extend(captain_result[1])
 
@@ -38,10 +47,28 @@ async def _crew_checkup():
     checklist.extend(navigator_result[0])
     checks.extend(navigator_result[1])
 
+    checklist.append("Cleanup was successful")
+    try:
+        campaigns_table = env("CAMPAIGNS_TABLE")[0]
+        with sqlite3_connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            query = "UPDATE {} SET {} WHERE id = ?".format(
+                    campaigns_table,
+                    ', '.join(f"{k} = ?" for k in initial_campaign.keys())
+                )
+            cursor.execute(query, tuple(initial_campaign[k] for k in initial_campaign.keys()) + (id,))
+            conn.commit()
+        checks.append(True)
+    except Exception:
+        checks.append(False)
+        logger.exception("Error during cleanup")
+    finally:
+        await playwright.stop()
     return checklist, checks
 
 async def main():
     configure_logger(debug=True)
+    await playwright.start()
     logger = logging.getLogger(__name__)
     checklist, checks = await _crew_checkup()
     for item, check in zip(checklist, checks):

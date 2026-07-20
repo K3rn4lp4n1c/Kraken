@@ -1,11 +1,9 @@
 from . import LOGGER_HANDLER_MARKER
+from .extensions import fancyFormatter
 from pathlib import Path
-from flyingdutchman.carpenter import fancyFormatter
 import os
 import logging
 import sqlite3
-
-
 
 def configure_logger(debug: bool = False) -> None:
     logger = logging.getLogger("flyingdutchman")
