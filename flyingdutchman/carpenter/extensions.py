@@ -63,8 +63,8 @@ class Campaign:
         self._browser_context = await p.create_context_with_callee_as_owner(**options)
         if self._browser_context is None:
             raise ValueError("Failed to create a browser context")
-        self._update_status(conn, "running")
         await self._save_state()
+        self._update_status(conn, "running")
         
     async def stop(self, conn: Connection) -> None:
         if self._browser_context is None:
@@ -72,7 +72,6 @@ class Campaign:
         await self._browser_context.close()
         self._browser_context = None
         self._update_status(conn, "stopped")
-        await self._save_state()
     
     async def restart(self, conn: Connection, p: PM, **options) -> None:
         if self._browser_context is not None:
@@ -81,8 +80,8 @@ class Campaign:
         self._browser_context = await p.create_context_with_callee_as_owner(**options)
         if self._browser_context is None:
             raise ValueError("Failed to create a browser context")
-        self._update_status(conn, "running")
         await self._save_state()
+        self._update_status(conn, "running")
     
     async def pause(self, conn: Connection, auth_path: Path | None = None) -> BrowserContext:
         if self._browser_context is None:
@@ -91,9 +90,9 @@ class Campaign:
             state_path = auth_path / f"{self.id}.json"
             await self._browser_context.storage_state(path=state_path)
         paused_context = self._browser_context
+        await self._save_state()
         self._browser_context = None
         self._update_status(conn, "paused")
-        await self._save_state()
         return paused_context
     
     async def resume(self, conn: Connection, p: PM, auth_path: Path | None = None,
@@ -110,8 +109,8 @@ class Campaign:
                 self._browser_context = await p.create_context_with_callee_as_owner(storage_state=state_path, **options)
         else:
             raise ValueError("Either auth_path or paused_context must be provided to resume the campaign")
-        self._update_status(conn, "running")
         await self._save_state()
+        self._update_status(conn, "running")
 
     async def authenticate(self, conn: Connection, url: str, expected_codes: tuple[int, ...], reqInit: dict = {}):
         """
