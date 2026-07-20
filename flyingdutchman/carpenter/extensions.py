@@ -51,9 +51,6 @@ class Campaign:
         Args:
             auth_path (Path): The path to the directory where the state file is located.
         """
-        state_path = self.auth_path / f"{self.id}.json"
-        if not state_path.exists():
-            raise FileNotFoundError(f"No saved state found for campaign id: {self.id}")
         context = await self.playwright_manager.get_context(self.id)
         self._browser_context = context
 
