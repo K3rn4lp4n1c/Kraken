@@ -23,6 +23,8 @@ async def _scout_campaign(p: PM, id: str, url: str, force: bool,
         id (str): The ID of the campaign.
         url (str): The URL to visit for recording the HAR file.
         force (bool): If True, overwrite the existing HAR file if it exists. Default is False.
+        endpoints (Optional(list[tuple[str, dict]])): A list of tuples with endpoint URLs and their corresponding request initialization parameters. Default is an empty list.
+
     Returns:
         tuple[bool, str, str]:
         A tuple containing a success status, a message, and the HAR content (if successful).
@@ -85,7 +87,7 @@ async def scout_campaign(id: str, url: str, force: bool = False,
         id (str): The ID of the campaign.
         url (str): The URL to visit for recording the HAR file.
         force (bool): If True, overwrite the existing HAR file if it exists. Default is False.
-        endpoints (Optional(list[tuple[str, dict]])): A list of tuples with endpoint URLs and their corresponding request initialization parameters. Default is an empty list.
+        endpoints (Optional(list[tuple[str, dict]])): A list of tuples with endpoint URLs as strings and their corresponding request initialization parameters as dictionaries. Default is an empty list.
     Returns:
         tuple[bool, str, str]:
         A tuple containing a success status, a message, and the HAR content (if successful).

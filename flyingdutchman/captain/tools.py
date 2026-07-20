@@ -108,7 +108,7 @@ async def control_campaign_lifecycle(id: str, action: str, options: dict) -> dic
 
     Args:
         id (str): The ID of the campaign.
-        action (str): The action to perform on the campaign. Can be 'start', 'stop', or 'restart'.
+        action (str): The action to perform on the campaign. Can be 'start', 'pause', 'resume', 'stop', or 'restart'.
         options (dict): Additional options to pass to `BrowserContext` creation function
     Returns:
         dict: Contains a success status and a message indicating the result of the operation.
