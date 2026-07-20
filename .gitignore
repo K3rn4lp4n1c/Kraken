@@ -219,3 +219,6 @@ __marimo__/
 
 # Assets
 assets/
+
+# Playwright
+.auth/
