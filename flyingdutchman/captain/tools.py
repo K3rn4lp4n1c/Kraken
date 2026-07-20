@@ -1,34 +1,10 @@
 from . import captain
-from flyingdutchman import DB_PATH
+from flyingdutchman import playwright, DB_PATH, PLAYWRIGHT_AUTH_DIRPATH
 from flyingdutchman.powderboy import *
 from flyingdutchman.carpenter.extensions import Campaign
+from flyingdutchman.navigator.tools import get_campaign_by_id
 
 import logging
-
-def get_campaign_by_id(id: str) -> tuple[bool, str, Campaign | None]:
-    """
-    Fetches a campaign by its ID from the database.
-
-    Args:
-        id (str): The ID of the campaign to fetch.
-    Returns:
-        tuple[bool, str, Campaign | None]:
-        A tuple containing a success status, a message, and the Campaign object if found.
-    """
-    try:
-        table_name = env("CAMPAIGNS_TABLE")[0]
-        with sqlite3_connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            fields = ["id", "name", "datetime", "url", "status"]
-            cursor.execute("SELECT {} FROM {} WHERE id=?".format(', '.join(fields),table_name),(id,))
-            row = cursor.fetchone()
-            if row is None:
-                return False, f"No campaign found with id: {id}", None
-            campaign_data = dict(zip(fields, row))
-            campaign = Campaign(**campaign_data)
-            return True, "Campaign fetched successfully.", campaign
-    except Exception as e:
-        return False, f"Error fetching campaign by id: {str(e)}", None
 
 def _get_campaigns() -> tuple[bool, str, list[dict]]:
     """
@@ -65,8 +41,7 @@ def get_campaigns() -> dict:
     success, message, campaigns = _get_campaigns()
     return {"success": success, "message": message, "campaigns": campaigns }
 
-async def _control_campaign_lifecycle(campaign: Campaign, action: str, options: dict = {}
-                                    ) -> tuple[bool, str]:
+async def _control_campaign_lifecycle(campaign: Campaign, action: str, **options) -> tuple[bool, str]:
     """
     Controls the lifecycle of a campaign. The following actions are supported:
     - 'start': Starts the campaign. Options is passed up to its browser context creation
@@ -86,11 +61,14 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, options: 
     """
     logger = logging.getLogger(__name__)
     try:
-        if action == 'start': await campaign.start(options)
-        elif action == 'pause': await campaign.pause()
-        elif action == 'resume': await campaign.resume(options=options)
-        elif action == 'stop': await campaign.stop()
-        elif action == 'restart': await campaign.restart(options)
+        if action == 'start':
+            await campaign.start(sqlite3_connect(DB_PATH), playwright, **options)
+        elif action == 'pause':
+            await campaign.pause(sqlite3_connect(DB_PATH), PLAYWRIGHT_AUTH_DIRPATH)
+        elif action == 'resume':
+            await campaign.resume(sqlite3_connect(DB_PATH), playwright, PLAYWRIGHT_AUTH_DIRPATH, **options)
+        elif action == 'stop': await campaign.stop(sqlite3_connect(DB_PATH))
+        elif action == 'restart': await campaign.restart(sqlite3_connect(DB_PATH), playwright, **options)
         return True, f"Campaign '{id}' {action}ed successfully."
     except Exception as e:
         logger.exception("Error controlling campaign lifecycle: %s", str(e))
@@ -113,7 +91,7 @@ async def control_campaign_lifecycle(id: str, action: str, options: dict) -> dic
     Returns:
         dict: Contains a success status and a message indicating the result of the operation.
     """
-    success, message, campaign = get_campaign_by_id(id)
+    success, message, campaign = get_campaign_by_id(sqlite3_connect(DB_PATH), id)
     if not success or campaign is None:
         return {"success": False, "message": message, "status": "unknown"}
     success, message = await _control_campaign_lifecycle(campaign, action, **options)
@@ -135,7 +113,7 @@ async def _authenticate_campaign(campaign: Campaign, url: str, expected_codes: t
     """
     logger = logging.getLogger(__name__)
     try:
-        await campaign.authenticate(url, expected_codes, reqInit)
+        await campaign.authenticate(sqlite3_connect(DB_PATH), PLAYWRIGHT_AUTH_DIRPATH, url, expected_codes, reqInit)
         return True, f"Campaign '{campaign.id}' authenticated successfully."
     except Exception as e:
         logger.exception("Error authenticating campaign: %s", str(e))
@@ -161,7 +139,7 @@ async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ..
     Returns:
         dict: Contains a success status and a message indicating the result of the operation.
     """
-    success, message, campaign = get_campaign_by_id(id)
+    success, message, campaign = get_campaign_by_id(sqlite3_connect(DB_PATH), id)
     if not success or campaign is None:
         return {"success": False, "message": message}
     success, message = await _authenticate_campaign(campaign, url, expected_codes, reqInit)
@@ -187,7 +165,7 @@ async def triage(id: str) -> tuple[list[str], list[bool]]:
     
     checklist.append("Campaigns Retrieval by ID was successful")
     try:
-        success, message, campaign = get_campaign_by_id(id)
+        success, message, campaign = get_campaign_by_id(sqlite3_connect(DB_PATH), id)
         if not success or campaign is None: raise Exception(message)
         checks.append(True)
     except Exception as e:
@@ -209,9 +187,9 @@ async def triage(id: str) -> tuple[list[str], list[bool]]:
         await _control_campaign_lifecycle(campaign, "stop")
         if campaign.status != "stopped":
             raise Exception(f"Expected status 'stopped', got '{campaign.status}'")
-        await _control_campaign_lifecycle(campaign, "restart",
-            {"extra_http_headers": {"ngrok-skip-browser-warning": "1"}}
-        )
+        await _control_campaign_lifecycle(campaign, "restart", extra_http_headers={
+            "ngrok-skip-browser-warning": "1"
+        })
         if campaign.status != "running":
             raise Exception(f"Expected status 'running', got '{campaign.status}'")
         checks.append(True)
@@ -223,7 +201,7 @@ async def triage(id: str) -> tuple[list[str], list[bool]]:
     try:
         if campaign is None: raise Exception("Campaign is None, cannot authenticate")
         if campaign.status != "running": raise Exception(f"Campaign status is not 'running', got '{campaign.status}'")
-        context = await campaign.pause()
+        context = await campaign.pause(sqlite3_connect(DB_PATH), PLAYWRIGHT_AUTH_DIRPATH)
         login_page = await context.new_page()
         login_url = campaign.url + "/login"
         await login_page.goto(login_url, wait_until="domcontentloaded", timeout=60_000)
@@ -234,6 +212,7 @@ async def triage(id: str) -> tuple[list[str], list[bool]]:
         # print("Page closed:", login_page.is_closed())
         # print("Matching nonce elements:", await nonce.count())
         # print("All context pages:", [page.url for page in login_page.context.pages])
+        # await login_page.screenshot(path=f"login_page_{id}.png", full_page=True)
         nonce_value = await nonce.input_value()
         reqInit = {
             "method": "POST",
@@ -245,7 +224,7 @@ async def triage(id: str) -> tuple[list[str], list[bool]]:
                 nonce_value=nonce_value
             )
         }
-        await campaign.resume(paused_context=context)
+        await campaign.resume(sqlite3_connect(DB_PATH), playwright, PLAYWRIGHT_AUTH_DIRPATH, paused_context=context)
         success, message = await _authenticate_campaign(campaign, login_url, (200,302), reqInit)
         if not success: raise Exception(message)
         checks.append(True)

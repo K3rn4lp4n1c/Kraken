@@ -1,12 +1,39 @@
 from . import navigator
 from pathlib import Path
 from datetime import datetime
+from sqlite3 import Connection
 from urllib.parse import urlparse, urlsplit
 from flyingdutchman import DB_PATH, HAR_DIRPATH, playwright, PlaywrightManager as PM
+from flyingdutchman.carpenter.extensions import Campaign
 from flyingdutchman.powderboy import env, sqlite3_connect, send_request
 
 import logging
 import hashlib
+
+def get_campaign_by_id(conn: Connection, id: str) -> tuple[bool, str, Campaign | None]:
+    """
+    Fetches a campaign by its ID from the database.
+
+    Args:
+        id (str): The ID of the campaign to fetch.
+    Returns:
+        tuple[bool, str, Campaign | None]:
+        A tuple containing a success status, a message, and the Campaign object if found.
+    """
+    try:
+        table_name = env("CAMPAIGNS_TABLE")[0]
+        with conn:
+            cursor = conn.cursor()
+            fields = ["id", "name", "datetime", "url", "status"]
+            cursor.execute("SELECT {} FROM {} WHERE id=?".format(', '.join(fields),table_name),(id,))
+            row = cursor.fetchone()
+            if row is None:
+                return False, f"No campaign found with id: {id}", None
+            campaign_data = dict(zip(fields, row))
+            campaign = Campaign(**campaign_data)
+            return True, "Campaign fetched successfully.", campaign
+    except Exception as e:
+        return False, f"Error fetching campaign by id: {str(e)}", None
 
 async def _scout_campaign(p: PM, id: str, url: str, force: bool,
                         endpoints: list[tuple[str, dict]] = []) -> tuple[bool, str, str]:
@@ -60,7 +87,7 @@ async def _scout_campaign(p: PM, id: str, url: str, force: bool,
                     "record_har_content": "embed", # NOTE: This is going to be a large one, hehe
                     "record_har_mode": "full", # NOTE: We want everything, no?
             }
-            async with p.create_context_with_caller_as_owner(browser_context_args) as context:
+            async with p.create_context_with_caller_as_owner(**browser_context_args) as context:
                 page = await context.new_page()
                 await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
                 await page.wait_for_timeout(5_000)
