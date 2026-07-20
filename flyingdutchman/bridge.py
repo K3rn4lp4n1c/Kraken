@@ -1,8 +1,7 @@
-from . import flyingdutchman
+from . import flyingdutchman, playwright
 from dotenv import load_dotenv
 from flyingdutchman.captain import captain
 from flyingdutchman.navigator import navigator
-from flyingdutchman.carpenter import playwright
 from flyingdutchman.powderboy import configure_logger, env
 
 import logging
@@ -30,10 +29,10 @@ async def main():
             host, port, path = env("FLYING_DUTCHMAN_HOST,FLYING_DUTCHMAN_PORT,FLYING_DUTCHMAN_PATH")
             await flyingdutchman.run_async(transport="http", host=host, port=int(port), path=path)
         else: raise ValueError(f"Unsupported transport: {transport}")
-    except KeyboardInterrupt:
-        logger.info("The Flying Dutchman is docking...")
     except Exception as e:
         logger.exception(f"The Flying Dutchman shipwrecked: {e}")
+    except KeyboardInterrupt:
+        logger.info("The Flying Dutchman is docking...")
     finally:
         await playwright.stop()
         logger.info("The Flying Dutchman has docked.")
