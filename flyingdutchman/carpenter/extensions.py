@@ -136,7 +136,7 @@ class Campaign:
             body = str(reqInit.get('body', ''))
             for key, value in credentials.items(): body = body.replace(f"{{{{{key}}}}}", value)
             if re.search(r"\{\{[A-Za-z_][A-Za-z0-9_]*\}\}", body):
-                raise ValueError(f"Not all placeholders in body were filled: {body}")
+                raise ValueError(f"Valid credentials keys: {list(credentials.keys())}")
             reqInit['body'] = body
             if self._browser_context is None or self._browser_context.is_closed():
                 raise ValueError("No browser context provided. Perhaps restart the campaign")
