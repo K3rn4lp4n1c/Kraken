@@ -102,5 +102,5 @@ async def send_request(page: Page, url: str, reqInit: dict[str, dict|str] = {}) 
                 };
             }
         }
-        """, {"url": url, "requestInit": reqInit},)
+        """, {"url": url, "requestInit": reqInit})
         return response

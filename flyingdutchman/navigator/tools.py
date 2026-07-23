@@ -86,10 +86,15 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
                 page = p
         if page is None:
             page = await context.new_page()
+            
             if headers is None: headers = {}
             await page.set_extra_http_headers(headers)
+            logger.info(f"Cookies: {await page.context.cookies()}")
             await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+            logger.info(f"Current pages in the campaign's browser context: {[page.url for page in context.pages]}")
+            
         await page.wait_for_timeout(5_000)
+        
         if endpoints is None: endpoints = []
         for endpoint, reqInit in endpoints:
             if urlparse(endpoint).netloc != parsed_url.netloc:
@@ -100,7 +105,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
         await context.tracing.stop_har()
         await campaign.resume(sqlite3_connect(DB_PATH), context)
         if not har_file_path.exists():
-            return False, f"Failed to record HAR file for campaign '{id}'.", ""
+            return False, f"Failed to record HAR file for campaign '{campaign.id}'.", ""
         har_content = har_file_path.read_text(encoding='utf-8')
         return True, f"Campaign '{campaign.id}' scouted successfully.", har_content
     except ValueError as ve:
@@ -141,19 +146,18 @@ async def scout_campaign(id: str, url: str, force: bool = False, headers: dict |
     success, message, har_content = await _scout_campaign(campaign, url, force, headers, endpoints)
     return {"success": success, "message": message, "har_content": har_content}
 
-async def triage(campaign: Campaign, url: str) -> tuple[list[str], list[bool]]:
+async def triage(campaign: Campaign, url: str, endpoint: tuple[str, dict]) -> tuple[str, list[str], list[bool]]:
     logger = logging.getLogger(__name__)
     checklist: list[str] = []
     checks: list[bool] = []
-    headers = {'ngrok-skip-browser-warning': 'true'}
-    endpoints = [(url, {"method": "GET", "headers": headers})]
+    har: str = ""
 
     checklist.append("Scouting the campaign")
     try:
-        success, message, _ = await _scout_campaign(campaign, url, True, headers, endpoints)
+        success, message, har = await _scout_campaign(campaign, url, True, endpoints=[endpoint])
         if not success: raise Exception(message)
         checks.append(True)
     except Exception as e:
         checks.append(False)
         logger.error(f"Error scouting campaign: {str(e)}")
-    return checklist, checks
+    return har, checklist, checks

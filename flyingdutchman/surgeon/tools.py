@@ -18,11 +18,24 @@ async def _prenup(id: str) -> dict:
         return initial_campaign
     else: raise ValueError(f"No campaign found with id: {id}")
 
-async def _crew_checkup(checklist: list[str], checks: list[bool], id: str, url: str) -> tuple[list[str], list[bool]]:
+async def _crew_checkup(id: str, url: str, scout_path: str, scout_endpoint: tuple[str, dict],
+                        har_should_contain: tuple[str, ...]) -> tuple[list[str], list[bool]]:
+    logger = logging.getLogger(__name__)
+    checklist: list[str] = []
+    checks: list[bool] = []
+
     captain_result = await captain(id)
     campaign = captain_result[0]
     checklist.extend(captain_result[1])
     checks.extend(captain_result[2])
+
+    pages_url = []
+    if campaign is not None:
+        if campaign._browser_context is not None:
+            pages = campaign._browser_context.pages
+            pages_url = [page.url for page in pages]
+            logger.info(f"Cookies: {await campaign._browser_context.cookies()}")
+    logger.info(f"Current pages in the campaign's browser context: {pages_url}")
     
     checklist.append("Campaign object is valid")
     if campaign is None:
@@ -30,9 +43,18 @@ async def _crew_checkup(checklist: list[str], checks: list[bool], id: str, url: 
         return checklist, checks
     else: checks.append(True)
 
-    navigator_result = await navigator(campaign, url)
-    checklist.extend(navigator_result[0])
-    checks.extend(navigator_result[1])
+    scout_url = url.rstrip("/") + scout_path
+    navigator_result = await navigator(campaign, scout_url, scout_endpoint)
+    har = navigator_result[0].lower()
+    checklist.extend(navigator_result[1])
+    checks.extend(navigator_result[2])
+
+    checklist.append("HAR file contains expected strings")
+    if not all(s in har for s in har_should_contain):
+        for s in har_should_contain:
+            if s not in har: logger.warning(f"Expected string '{s}' not found in HAR file.")
+        checks.append(False)
+    else: checks.append(True)
 
     return checklist, checks
 
@@ -57,6 +79,14 @@ async def main():
     checks: list[bool] = []
     id = "0" # NOTE: IDs are autoincremented as they come starting from 1, so use 0 for testing ;)
     url = "https://architectural-presumptuously-jeanine.ngrok-free.dev/ctf" # Ngrok rocks! (for now)
+    endpoint = (url + "/api/v1/challenges", 
+                {"method": "GET", 
+                "headers": {
+                    "Content-Type": "application/json",
+                    'ngrok-skip-browser-warning': 'true'
+                }})
+    scout_url_path = "/challenges"
+    har_should_contain = ("challenges", "warmup", "pilot")
     initial_campaign: dict | None = None
 
     checklist.append("Database connection is valid")
@@ -68,7 +98,9 @@ async def main():
         logger.exception("Error fetching initial campaign state: %s", str(e))
     
     try:
-        checklist, checks = await _crew_checkup(id=id, url=url, checklist=checklist, checks=checks)
+        res = await _crew_checkup(id, url, scout_url_path, endpoint, har_should_contain)
+        checklist.extend(res[0])
+        checks.extend(res[1])
         for item, check in zip(checklist, checks):
             status = "\033[32mPASS\033[0m" if check else "\033[31mFAIL\033[0m"
             logger.info(f"{item}: {status}")
