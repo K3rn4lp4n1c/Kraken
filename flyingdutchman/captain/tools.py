@@ -73,7 +73,7 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, **options
         return False, f"Internal Server Error in controlling campaign lifecycle"
 
 @captain.tool()
-async def control_campaign_lifecycle(id: str, action: str, options: dict) -> dict:
+async def control_campaign_lifecycle(id: str, action: str, options: dict = {}) -> dict:
     """
     Controls the lifecycle of a campaign. The following actions are supported:
     - 'start': Starts the campaign. Options is passed up to its browser context creation
@@ -100,7 +100,7 @@ async def control_campaign_lifecycle(id: str, action: str, options: dict) -> dic
     return {"success": success, "message": message}
 
 async def _authenticate_campaign(campaign: Campaign, url: str, expected_codes: tuple[int, ...],
-                                reqInit: dict = {}) -> tuple[bool, str]:
+                                reqInit: dict |  None) -> tuple[bool, str]:
     """
     Authenticates a campaign with a given browser context.
 
@@ -126,7 +126,7 @@ async def _authenticate_campaign(campaign: Campaign, url: str, expected_codes: t
 
 @captain.tool()
 async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ...],
-                            reqInit: dict = {}) -> dict:
+                            reqInit: dict | None = None) -> dict:
     """
     Authenticates a running campaign and stores the authentication state in the its browser context.
     It uses the login page with the provided url if it exists in the browser context

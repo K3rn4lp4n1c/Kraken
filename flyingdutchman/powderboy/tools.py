@@ -73,8 +73,6 @@ async def send_request(page: Page, url: str, reqInit: dict[str, dict|str] = {}) 
         Returns:
             dict: A dictionary containing the response status and data.
         """
-        await page.goto(url)
-        await page.wait_for_load_state("domcontentloaded")
         response = await page.evaluate(
         """
         async ({ url, requestInit }) => {
