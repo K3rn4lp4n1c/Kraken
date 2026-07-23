@@ -132,12 +132,13 @@ class Campaign:
             row = cursor.fetchone()
             if row is None: raise ValueError(f"No credentials found for campaign id: {self.id}")
             credentials: dict = json.loads(row[0])
-            reqInit = endpoint[1] if endpoint[1] is not None else {} 
+            reqInit = endpoint[1].copy() if endpoint[1] is not None else {}
             body = str(reqInit.get('body', ''))
             for key, value in credentials.items(): body = body.replace(f"{{{{{key}}}}}", value)
             if re.search(r"\{\{[A-Za-z_][A-Za-z0-9_]*\}\}", body):
                 raise ValueError(f"Valid credentials keys: {list(credentials.keys())}")
             reqInit['body'] = body
+            new_endpoint = (endpoint[0], reqInit)
             if self._browser_context is None or self._browser_context.is_closed():
                 raise ValueError("No browser context provided. Perhaps restart the campaign")
             if urlparse(page_url).netloc != urlparse(self.url).netloc:
@@ -151,7 +152,7 @@ class Campaign:
             if page is None:
                 page = await self._browser_context.new_page()
                 resp = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
-            resp = await send_request(page, endpoint)
+            resp = await send_request(page, new_endpoint)
             if resp["status"] not in expected_codes:
                 raise ValueError(f"Authentication failed ({resp['status']}), data: {resp['data'][:20]}")
         await self._save_state()
