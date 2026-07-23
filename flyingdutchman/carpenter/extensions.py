@@ -112,7 +112,8 @@ class Campaign:
         await self._save_state()
         self._update_status(conn, "running")
 
-    async def authenticate(self, conn: Connection, url: str, expected_codes: tuple[int, ...], reqInit: dict = {}):
+    async def authenticate(self, conn: Connection, url: str, expected_codes: tuple[int, ...],
+                           reqInit: dict | None = None) -> None:
         """
         Authenticate the campaign with a given browser context.
 
@@ -130,6 +131,7 @@ class Campaign:
             row = cursor.fetchone()
             if row is None: raise ValueError(f"No credentials found for campaign id: {self.id}")
             credentials: dict = json.loads(row[0])
+            if reqInit is None: reqInit = {}
             for key, value in credentials.items(): str(reqInit['body']).replace(f"{{{key}}}", value)
             if '{{{' in str(reqInit['body']) and '}}}' in str(reqInit['body']):
                 raise ValueError(f"Not all placeholders in body were filled: {reqInit['body']}")
