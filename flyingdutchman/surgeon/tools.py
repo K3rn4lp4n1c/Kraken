@@ -28,14 +28,6 @@ async def _crew_checkup(id: str, url: str, scout_path: str, scout_endpoint: tupl
     campaign = captain_result[0]
     checklist.extend(captain_result[1])
     checks.extend(captain_result[2])
-
-    pages_url = []
-    if campaign is not None:
-        if campaign._browser_context is not None:
-            pages = campaign._browser_context.pages
-            pages_url = [page.url for page in pages]
-            logger.info(f"Cookies: {await campaign._browser_context.cookies()}")
-    logger.info(f"Current pages in the campaign's browser context: {pages_url}")
     
     checklist.append("Campaign object is valid")
     if campaign is None:

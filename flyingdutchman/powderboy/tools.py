@@ -62,7 +62,7 @@ def sqlite3_connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     return conn
 
-async def send_request(page: Page, url: str, reqInit: dict[str, dict|str] = {}) -> dict:
+async def send_request(page: Page, endpoint: tuple[str, dict | None]) -> dict:
         """
         Send a request to the campaign's URL using the provided browser context.
 
@@ -73,6 +73,8 @@ async def send_request(page: Page, url: str, reqInit: dict[str, dict|str] = {}) 
         Returns:
             dict: A dictionary containing the response status and data.
         """
+        url = endpoint[0]
+        reqInit = endpoint[1] if len(endpoint) > 1 else {}
         response = await page.evaluate(
         """
         async ({ url, requestInit }) => {

@@ -99,8 +99,8 @@ async def control_campaign_lifecycle(id: str, action: str, options: dict = {}) -
     success, message = await _control_campaign_lifecycle(campaign, action, **options)
     return {"success": success, "message": message}
 
-async def _authenticate_campaign(campaign: Campaign, url: str, expected_codes: tuple[int, ...],
-                                reqInit: dict |  None) -> tuple[bool, str]:
+async def _authenticate_campaign(campaign: Campaign, page_url: str, endpoint: tuple[str, dict | None],
+                                expected_codes: tuple[int, ...],) -> tuple[bool, str]:
     """
     Authenticates a campaign with a given browser context.
 
@@ -115,7 +115,7 @@ async def _authenticate_campaign(campaign: Campaign, url: str, expected_codes: t
     """
     logger = logging.getLogger(__name__)
     try:
-        await campaign.authenticate(sqlite3_connect(DB_PATH), url, expected_codes, reqInit)
+        await campaign.authenticate(sqlite3_connect(DB_PATH), page_url, endpoint, expected_codes)
         return True, f"Campaign '{campaign.id}' authenticated successfully."
     except ValueError as ve:
         logger.error("Error authenticating campaign: %s", str(ve))
@@ -125,8 +125,8 @@ async def _authenticate_campaign(campaign: Campaign, url: str, expected_codes: t
         return False, f"Internal Server Error in authenticating campaign"
 
 @captain.tool()
-async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ...],
-                            reqInit: dict | None = None) -> dict:
+async def authenticate_campaign(id: str, page_url: str, endpoint: tuple[str, dict | None],
+                                expected_codes: tuple[int, ...],) -> dict:
     """
     Authenticates a running campaign and stores the authentication state in the its browser context.
     It uses the login page with the provided url if it exists in the browser context
@@ -143,9 +143,9 @@ async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ..
 
     Args:
         id (str): The ID of the campaign.
-        url (str): The URL to send the authentication request to.
+        page_url (str): The URL of the page to navigate to for authentication. This should be the login page of the campaign.
+        endpoint (tuple[str, dict | None]): A tuple containing the URL and an optional dictionary of request initialization parameters.
         expected_codes (tuple[int, ...]): A tuple of expected HTTP status codes for a successful request.
-        reqInit (dict): Optional dictionary containing request initialization parameters.
 
     Returns:
         dict: Contains a success status and a message indicating the result of the operation.
@@ -153,7 +153,7 @@ async def authenticate_campaign(id: str, url: str, expected_codes: tuple[int, ..
     success, message, campaign = get_campaign_by_id(sqlite3_connect(DB_PATH), id)
     if not success or campaign is None:
         return {"success": False, "message": message}
-    success, message = await _authenticate_campaign(campaign, url, expected_codes, reqInit)
+    success, message = await _authenticate_campaign(campaign, page_url, endpoint, expected_codes)
     return {"success": success, "message": message}
 
 async def triage(id: str) -> tuple[Campaign | None, list[str], list[bool]]:
@@ -234,7 +234,7 @@ async def triage(id: str) -> tuple[Campaign | None, list[str], list[bool]]:
             "body": f"name={{{{name}}}}&password={{{{password}}}}&_submit=Submit&nonce={nonce_value}"
         }
         await campaign.resume(sqlite3_connect(DB_PATH), context)
-        success, message = await _authenticate_campaign(campaign, login_url, (200,302), reqInit)
+        success, message = await _authenticate_campaign(campaign, login_url, (login_url, reqInit), (200,302,))
         if not success: raise Exception(message)
         checks.append(True)
     except Exception as e:

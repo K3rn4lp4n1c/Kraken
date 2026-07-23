@@ -89,18 +89,16 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
             
             if headers is None: headers = {}
             await page.set_extra_http_headers(headers)
-            logger.info(f"Cookies: {await page.context.cookies()}")
             await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-            logger.info(f"Current pages in the campaign's browser context: {[page.url for page in context.pages]}")
             
         await page.wait_for_timeout(5_000)
         
         if endpoints is None: endpoints = []
-        for endpoint, reqInit in endpoints:
-            if urlparse(endpoint).netloc != parsed_url.netloc:
-                logger.warning(f"'{endpoint}' does not match expected domain for campaign '{campaign.id}'. Skipping...")
+        for endpoint in endpoints:
+            if urlparse(endpoint[0]).netloc != parsed_url.netloc:
+                logger.warning(f"'{endpoint[0]}' does not match expected domain for campaign '{campaign.id}'. Skipping...")
                 continue
-            await send_request(page, endpoint, reqInit)
+            await send_request(page, endpoint)
             await page.wait_for_timeout(1_000)
         await context.tracing.stop_har()
         await campaign.resume(sqlite3_connect(DB_PATH), context)
