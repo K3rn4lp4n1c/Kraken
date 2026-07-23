@@ -231,9 +231,7 @@ async def triage(id: str) -> tuple[Campaign | None, list[str], list[bool]]:
                 "Content-Type": "application/x-www-form-urlencoded",
                 "ngrok-skip-browser-warning": "1",
             },
-            "body": "name={{name}}&password={{password}}&_submit=Submit&nonce={nonce_value}".format(
-                nonce_value=nonce_value
-            )
+            "body": f"name={{{{name}}}}&password={{{{password}}}}&_submit=Submit&nonce={nonce_value}"
         }
         await campaign.resume(sqlite3_connect(DB_PATH), context)
         success, message = await _authenticate_campaign(campaign, login_url, (200,302), reqInit)

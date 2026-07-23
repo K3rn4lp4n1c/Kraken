@@ -8,6 +8,7 @@ from playwright.async_api import BrowserContext, Page
 from flyingdutchman.powderboy import env, send_request, PlaywrightManager as PM
 
 import json
+import re
 
 @dataclass
 class Challenge:
@@ -132,9 +133,11 @@ class Campaign:
             if row is None: raise ValueError(f"No credentials found for campaign id: {self.id}")
             credentials: dict = json.loads(row[0])
             if reqInit is None: reqInit = {}
-            for key, value in credentials.items(): reqInit['body'] = str(reqInit['body']).replace(f"{{{key}}}", value)
-            if '{{{' in str(reqInit['body']) and '}}}' in str(reqInit['body']):
-                raise ValueError(f"Not all placeholders in body were filled: {reqInit['body']}")
+            body = str(reqInit.get('body', ''))
+            for key, value in credentials.items(): body = body.replace(f"{{{{{key}}}}}", value)
+            if re.search(r"\{\{[A-Za-z_][A-Za-z0-9_]*\}\}", body):
+                raise ValueError(f"Not all placeholders in body were filled: {body}")
+            reqInit['body'] = body
             if self._browser_context is None or self._browser_context.is_closed():
                 raise ValueError("No browser context provided. Perhaps restart the campaign")
             if urlparse(url).netloc != urlparse(self.url).netloc:
