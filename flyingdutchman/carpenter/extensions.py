@@ -132,7 +132,7 @@ class Campaign:
             if row is None: raise ValueError(f"No credentials found for campaign id: {self.id}")
             credentials: dict = json.loads(row[0])
             if reqInit is None: reqInit = {}
-            for key, value in credentials.items(): str(reqInit['body']).replace(f"{{{key}}}", value)
+            for key, value in credentials.items(): reqInit['body'] = str(reqInit['body']).replace(f"{{{key}}}", value)
             if '{{{' in str(reqInit['body']) and '}}}' in str(reqInit['body']):
                 raise ValueError(f"Not all placeholders in body were filled: {reqInit['body']}")
             if self._browser_context is None or self._browser_context.is_closed():
