@@ -113,8 +113,8 @@ class Campaign:
         await self._save_state()
         self._update_status(conn, "running")
 
-    async def authenticate(self, conn: Connection, url: str, expected_codes: tuple[int, ...],
-                           reqInit: dict | None = None) -> None:
+    async def authenticate(self, conn: Connection, page_url: str, endpoint: tuple[str, dict|None],
+                           expected_codes: tuple[int, ...]) -> None:
         """
         Authenticate the campaign with a given browser context.
 
@@ -132,7 +132,7 @@ class Campaign:
             row = cursor.fetchone()
             if row is None: raise ValueError(f"No credentials found for campaign id: {self.id}")
             credentials: dict = json.loads(row[0])
-            if reqInit is None: reqInit = {}
+            reqInit = endpoint[1] if endpoint[1] is not None else {} 
             body = str(reqInit.get('body', ''))
             for key, value in credentials.items(): body = body.replace(f"{{{{{key}}}}}", value)
             if re.search(r"\{\{[A-Za-z_][A-Za-z0-9_]*\}\}", body):
@@ -140,17 +140,18 @@ class Campaign:
             reqInit['body'] = body
             if self._browser_context is None or self._browser_context.is_closed():
                 raise ValueError("No browser context provided. Perhaps restart the campaign")
-            if urlparse(url).netloc != urlparse(self.url).netloc:
+            if urlparse(page_url).netloc != urlparse(self.url).netloc:
                 raise ValueError("The provided URL does not match the campaign's URL.")
             page: Page | None = None
             for p in self._browser_context.pages:
-                if p.url == url:
+                if p.url == page_url:
                     if page is not None:
-                        raise ValueError(f"Multiple pages found with the same URL: {url}. Perhaps restart the campaign.")
+                        raise ValueError(f"Multiple pages found with the same URL: {page_url}. Perhaps restart the campaign.")
                     page = p
-            if page is None: page = await self._browser_context.new_page()
-            resp = await send_request(page, url, reqInit)
+            if page is None:
+                page = await self._browser_context.new_page()
+                resp = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
+            resp = await send_request(page, endpoint)
             if resp["status"] not in expected_codes:
-                raise ValueError(f"Authentication failed ({resp['status']}), data: {resp['data']}")
-        #await self._browser_context.storage_state(path=auth_path / f"{self.id}.json")
+                raise ValueError(f"Authentication failed ({resp['status']}), data: {resp['data'][:20]}")
         await self._save_state()
