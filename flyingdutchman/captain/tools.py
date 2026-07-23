@@ -1,5 +1,5 @@
 from . import captain
-from flyingdutchman import playwright, DB_PATH, PLAYWRIGHT_AUTH_DIRPATH
+from flyingdutchman import playwright, DB_PATH
 from flyingdutchman.powderboy import *
 from flyingdutchman.carpenter.extensions import Campaign
 from flyingdutchman.navigator.tools import get_campaign_by_id

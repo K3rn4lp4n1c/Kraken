@@ -54,6 +54,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
         campaign (Campaign): The Campaign object for which to record the HAR file.
         url (str): The URL to visit for recording the HAR file.
         force (bool): If True, overwrite the existing HAR file if it exists. Default is False.
+        headers (Optional(dict)): Optional dictionary containing request headers that will be set on the page request. Default is None.
         endpoints (Optional(list[tuple[str, dict]])): A list of tuples with endpoint URLs and their corresponding request initialization parameters. Default is an empty list.
 
     Returns:
