@@ -9,6 +9,9 @@ transport = StdioTransport(command="python3", args=["-m", MCP_SERVER])
 client = Client(transport=transport)
 
 async def main():
+    if client is None:
+        print("Client is not initialized.")
+        return
     async with client:
         await client.ping()
 
@@ -36,4 +39,8 @@ async def main():
                                         )]
                                     })
         with open("scout_campaign.har", "w") as f:
+            structured_content = result.structured_content
+            if structured_content is None:
+                print("No structured content returned from the tool call.")
+                return
             json.dump(result.structured_content, f, indent=4)
