@@ -35,8 +35,13 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
     recording_har = False
     try:
         parsed_url = urlparse(url)
-        if parsed_url.netloc != urlsplit(campaign.url).netloc:
-            return False, f"'{url}' does not match expected domain for campaign id: {id}", ""
+        alike = (
+            parsed_url.scheme == urlparse(campaign.url).scheme and
+            parsed_url.netloc == urlparse(campaign.url).netloc and
+            parsed_url.port == urlparse(campaign.url).port
+        )
+        if not alike:
+            return False, f"'{url}' does not match expected domain for campaign id: {campaign.id}", ""
         har_dir = HAR_DIRPATH / str(campaign.id)
         har_path = hashlib.md5(parsed_url.geturl().encode()).hexdigest() + ".har"
         Path.mkdir(har_dir, parents=True, exist_ok=True)
@@ -48,7 +53,6 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
             return True, f"Campaign '{campaign.id}' already scouted at {m_time}.", har_content
         har_file_path.unlink(missing_ok=True)
         context = await campaign.pause()
-        logger.debug(f"Cookies after authentication: {await context.cookies()}")
         page: Page | None = None
         await context.tracing.start_har(har_file_path, mode="full", content="embed")
         recording_har = True
@@ -65,16 +69,18 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
             if headers is None: headers = {}
             await page.set_extra_http_headers(headers)
             await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-            await page.screenshot(path=f"scout_campaign_{campaign.id}.png")
-            
-        await page.wait_for_timeout(5_000)
+            await page.wait_for_timeout(5_000)
         
         if endpoints is None: endpoints = []
         for endpoint in endpoints:
-            if urlparse(endpoint[0]).netloc != parsed_url.netloc:
+            alike = (
+                urlparse(endpoint[0]).scheme == parsed_url.scheme and
+                urlparse(endpoint[0]).netloc == parsed_url.netloc and
+                urlparse(endpoint[0]).path == parsed_url.path
+            )
+            if not alike:
                 logger.warning(f"'{endpoint[0]}' does not match expected domain for campaign '{campaign.id}'. Skipping...")
                 continue
-            logger.debug(f"Cookies after authentication: {await page.context.cookies()}")
             await send_request(page, url, endpoint)
             await page.wait_for_timeout(1_000)
         await context.tracing.stop_har()

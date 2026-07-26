@@ -104,11 +104,14 @@ async def send_request(page: Page, campaign_url: str, endpoint: tuple[str, dict 
             dict: A dictionary containing the response status and data.
         """
         url = endpoint[0]
-        if urlparse(url).netloc != urlparse(campaign_url).netloc:
+        alike = (
+            urlparse(url).scheme == urlparse(campaign_url).scheme and
+            urlparse(url).netloc == urlparse(campaign_url).netloc and
+            urlparse(url).port == urlparse(campaign_url).port
+        )
+        if not alike:
             raise ValueError("The provided URL does not match the campaign's URL.")
         reqInit = endpoint[1] if len(endpoint) > 1 else {}
-        logger = logging.getLogger(__name__)
-        logger.debug(f"Sending request to {url} with init: {reqInit}")
         response = await page.evaluate(
         """
         async ({ url, requestInit }) => {

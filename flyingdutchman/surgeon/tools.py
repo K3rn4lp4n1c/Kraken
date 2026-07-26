@@ -6,17 +6,17 @@ from flyingdutchman.navigator import triage as navigator
 
 import logging
 
-async def _prenup(id: str) -> dict:
+async def _prenup(cid: str) -> dict:
     campaigns_table = env("CAMPAIGNS_TABLE")[0]
     with sqlite3_connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM {} WHERE id = ?".format(campaigns_table), (id,))
+        cursor.execute("SELECT * FROM {} WHERE id = ?".format(campaigns_table), (cid,))
         result = cursor.fetchone()
-    if result is not None and str(result[0]) == id:
+    if result is not None and str(result[0]) == cid:
         initial_campaign = dict(zip([column[0] for column in cursor.description], result))
         initial_campaign.pop("id", None)
         return initial_campaign
-    else: raise ValueError(f"No campaign found with id: {id}")
+    else: raise ValueError(f"No campaign found with id: {cid}")
 
 async def _crew_checkup(id: str, url: str, scout_path: str, scout_endpoint: tuple[str, dict],
                         har_should_contain: tuple[str, ...]) -> tuple[list[str], list[bool]]:

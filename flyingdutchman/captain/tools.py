@@ -24,7 +24,10 @@ def _get_campaigns() -> tuple[bool, str, list[dict]]:
             cursor.execute("SELECT {} FROM {}".format(', '.join(fields), table_name))
             rows = cursor.fetchall()
             db_campaigns = [dict(zip(fields, row)) for row in rows]
-            [{**c, "loaded": campaigns.get_campaign(c['id']) is not None} for c in db_campaigns]
+            db_campaigns = [
+                {**c, "loaded": campaigns.get_campaign(c['id']) is not None}
+                for c in db_campaigns
+            ]
             return True, "Campaigns fetched successfully.", db_campaigns
     except Exception as e:
         return False, f"Error fetching campaigns: {str(e)}", []
@@ -56,8 +59,8 @@ def _load_campaigns_from_db(campaign_ids: list[str]) -> tuple[bool, str]:
             table_name = env("CAMPAIGNS_TABLE")[0]
             fields = ["id", "name", "datetime", "url", "status"]
             cursor.execute("SELECT {} FROM {} WHERE id IN {}".format(
-                ', '.join(fields), table_name, "(" + ",".join(campaign_ids) + ")"
-            ))
+                ', '.join(fields), table_name, "(" + ",".join("?" for _ in campaign_ids) + ")"
+            ), campaign_ids)
             rows = cursor.fetchall()
             for row in rows:
                 campaign_data = dict(zip(fields, row))
@@ -119,6 +122,7 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | N
         elif action == 'restart':
             if p is None: raise ValueError("PlaywrightManager instance must be provided for 'restart'")
             await campaign.restart(p, **options)
+        else: raise ValueError(f"Unsupported action: {action}")
         return True, f"{action} on Campaign '{campaign.id}' was successfully."
     except Exception as e:
         logger.exception("Error controlling campaign lifecycle: %s", str(e))
