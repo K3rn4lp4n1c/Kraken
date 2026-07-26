@@ -278,13 +278,13 @@ class Campaign:
                 if resp_ok is not None and not resp_ok:
                     self._logger.warning(f"Failed to send HTTP request: Response data:"
                                         f"{str(resp['data'])[:200]}")
-                    raise ValueError(f"Failed to send HTTP request.")
+                    raise ValueError(f"Authentication failed ({resp['status']}): {str(resp['data'])[:200]}")
                 if resp["status"] not in expected_codes:
                     self._logger.warning(f"Authentication failed ({resp['status']}). "
                                        f"Expected codes: {expected_codes}. "
                                        f"Response data: {str(resp['data'])[:200]}..."
                                     )
-                    raise ValueError(f"Authentication failed ({resp['status']})")
+                    raise ValueError(f"Authentication failed ({resp['status']}): {str(resp['data'])[:200]}...")
             await self._save_state()
             self._authenticated = True
 
