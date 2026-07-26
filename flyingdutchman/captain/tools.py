@@ -51,7 +51,7 @@ def _load_campaigns_from_db(campaign_ids: list[str]) -> tuple[bool, str]:
     Loads campaigns into the CampaignManager based on their IDs.
 
     Args:
-        id (list[str]): A list of campaign IDs to load.
+        campaign_ids (list[str]): List of campaign IDs to load.
     """
     logger = logging.getLogger(__name__)
     try:
@@ -192,7 +192,7 @@ async def authenticate_campaign(cid: str, page_url: str, endpoint: tuple[str, di
     inside the campaign context.
 
     The tool reuses an existing page matching `page_url` or creates one when
-    none exists. The campaign must already be running.
+    no ne exists. The campaign must already be running.
 
     The request body schema is:
     ```
@@ -212,10 +212,10 @@ async def authenticate_campaign(cid: str, page_url: str, endpoint: tuple[str, di
     credentials. Endpoint URL must match the campaign origin used by `page_url`.
 
     Args:
-        - cid (str): ID of a campaign that has already been loaded.
-        - page_url (str): Page URL used to perform authentication.
-        - endpoint (tuple[str, dict | None]): `(url, request_init)` for the request.
-        - expected_codes (tuple[int, ...]): HTTP status codes considered successful.
+        cid (str): ID of a campaign that has already been loaded.
+        page_url (str): Page URL used to perform authentication.
+        endpoint (tuple[str, dict | None]): `(url, request_init)` for the request.
+        expected_codes (tuple[int, ...]): HTTP status codes considered successful.
 
     Returns:
         dict: Contains `success` and `message`.

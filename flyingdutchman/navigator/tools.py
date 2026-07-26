@@ -2,7 +2,7 @@ from . import navigator
 from pathlib import Path
 from datetime import datetime
 from playwright.async_api import Page, BrowserContext
-from urllib.parse import urlparse, urlsplit
+from urllib.parse import urlparse
 from flyingdutchman.carpenter import Campaign, send_request
 from flyingdutchman import campaigns, HAR_DIRPATH
 
