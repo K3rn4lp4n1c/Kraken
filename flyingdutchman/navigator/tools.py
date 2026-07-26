@@ -76,7 +76,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
             alike = (
                 urlparse(endpoint[0]).scheme == parsed_url.scheme and
                 urlparse(endpoint[0]).netloc == parsed_url.netloc and
-                urlparse(endpoint[0]).path == parsed_url.path
+                urlparse(endpoint[0]).port == parsed_url.port
             )
             if not alike:
                 logger.warning(f"'{endpoint[0]}' does not match expected domain for campaign '{campaign.id}'. Skipping...")
