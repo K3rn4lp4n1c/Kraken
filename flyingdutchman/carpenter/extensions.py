@@ -154,6 +154,7 @@ class Campaign:
             await self._load_state()
             if self._browser_context is None:
                 raise ValueError("No browser context to stop. Perhaps start the campaign first")
+            self._browser_context.close()
             self._browser_context = None
             await self._save_state()
             self._update_status("stopped")
@@ -162,6 +163,7 @@ class Campaign:
         async with self._lifecycle_lock:
             await self._load_state()
             if self._browser_context is not None:
+                self._browser_context.close()
                 self._browser_context = None
                 await self._save_state()
             self._browser_context = await p.create_context_with_callee_as_owner(**options)
