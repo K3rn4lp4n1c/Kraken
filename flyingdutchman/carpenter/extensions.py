@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 from dataclasses import dataclass, field
 from collections.abc import AsyncGenerator
 from playwright.async_api import Playwright, Browser, BrowserContext, Page, async_playwright
@@ -154,7 +154,7 @@ class Campaign:
             await self._load_state()
             if self._browser_context is None:
                 raise ValueError("No browser context to stop. Perhaps start the campaign first")
-            self._browser_context.close()
+            await self._browser_context.close()
             self._browser_context = None
             await self._save_state()
             self._update_status("stopped")
@@ -190,7 +190,7 @@ class Campaign:
             await self._save_state()
             self._update_status("running")
 
-    def _normalize_request_body(self, body: dict, interpolated_values: dict) -> dict | str:
+    def _normalize_request_body(self, body: dict, interpolated_values: dict) -> str:
         """
         Normalize the request body by replacing placeholders with actual credential values.
 
@@ -216,13 +216,13 @@ class Campaign:
             else:
                 normalized_body[key] = value
         if encoding == "form":
-            return '&&'.join(f"{k}={v}" for k, v in normalized_body.items())
+            return urlencode(normalized_body, doseq=True)
         if encoding == "query":
             return '&'.join(f"{k}={v}" for k, v in normalized_body.items())
         if encoding == "text":
             return '\n'.join(f"{k}={v}" for k, v in normalized_body.items())
         elif encoding == "json":
-            return normalized_body
+            return json.dumps(normalized_body)
         else:
             raise ValueError(f"Unsupported encoding type: {encoding}. Supported types are 'json' and 'form'.")
 
@@ -256,7 +256,12 @@ class Campaign:
                 new_endpoint = (endpoint[0], reqInit)
                 if self._browser_context is None or self._browser_context.is_closed():
                     raise ValueError("No browser context provided. Perhaps restart the campaign")
-                if urlparse(page_url).netloc != urlparse(self.url).netloc:
+                alike = (
+                    urlparse(page_url).scheme == urlparse(self.url).scheme and
+                    urlparse(page_url).netloc == urlparse(self.url).netloc and
+                    urlparse(page_url).port == urlparse(self.url).port
+                )
+                if not alike:
                     raise ValueError("The provided URL does not match the campaign's URL.")
                 page: Page | None = None
                 for p in self._browser_context.pages:
@@ -267,7 +272,6 @@ class Campaign:
                 if page is None:
                     page = await self._browser_context.new_page()
                     resp = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
-                self._logger.debug(f"Cookies before authentication: {await page.context.cookies()}")
                 resp = await send_request(page, page_url, new_endpoint)
                             
                 resp_ok = resp.get("ok")
@@ -293,11 +297,12 @@ class CampaignManager:
         return self._campaigns.get(campaign_id, None)
 
     def add_campaign(self, campaign: Campaign) -> None:
-        if campaign.id in self._campaigns:
+        if str(campaign.id) in self._campaigns:
             raise ValueError(f"Campaign with id {campaign.id} already exists. Remove it first")
         self._campaigns[str(campaign.id)] = campaign
 
-    def remove_campaign(self, campaign_id: str) -> None:
+    async def remove_campaign(self, campaign_id: str) -> None:
         if campaign_id not in self._campaigns:
             raise ValueError(f"Campaign with id {campaign_id} does not exist. Add it first")
+        await self._campaigns[campaign_id].stop()
         del self._campaigns[campaign_id]
