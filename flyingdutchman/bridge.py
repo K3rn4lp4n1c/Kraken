@@ -2,7 +2,7 @@ from . import flyingdutchman, playwright
 from dotenv import load_dotenv
 from flyingdutchman.captain import captain
 from flyingdutchman.navigator import navigator
-from flyingdutchman.powderboy import configure_logger, env
+from flyingdutchman.carpenter import configure_logger, env
 
 import logging
 
@@ -31,6 +31,7 @@ async def main():
         else: raise ValueError(f"Unsupported transport: {transport}")
     except Exception as e:
         logger.exception(f"The Flying Dutchman shipwrecked: {e}")
+        raise Exception(f"The Flying Dutchman shipwrecked: {e}") from e
     except KeyboardInterrupt:
         logger.info("The Flying Dutchman is docking...")
     finally:
