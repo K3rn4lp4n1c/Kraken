@@ -1,24 +1,88 @@
 from __future__ import annotations
 from pathlib import Path
 from datetime import datetime
-from sqlite3 import Connection
 from urllib.parse import urlparse
 from dataclasses import dataclass, field
-from playwright.async_api import BrowserContext, Page
-from flyingdutchman.powderboy import env, send_request, PlaywrightManager as PM
+from collections.abc import AsyncGenerator
+from playwright.async_api import Playwright, Browser, BrowserContext, Page, async_playwright
+from .tools import send_request, sqlite3_connect, env
 
+import asyncio
 import json
-import re
+import logging
+
+class PlaywrightManager:
+    def __init__(self) -> None:
+        self._playwright: Playwright | None = None
+        self._browser: Browser | None = None
+        self._lifecycle_lock = asyncio.Lock()
+
+    async def start(self) -> None:
+        """Start Playwright and launch one shared browser."""
+
+        async with self._lifecycle_lock:
+            if self._browser is not None and self._browser.is_connected():
+                return
+
+            playwright = await async_playwright().start()
+
+            try:
+                browser = await playwright.chromium.launch(headless=True)
+            except Exception:
+                await playwright.stop()
+                raise
+
+            self._playwright = playwright
+            self._browser = browser
+
+    async def stop(self) -> None:
+        """Close the shared browser and stop Playwright."""
+
+        async with self._lifecycle_lock:
+            browser = self._browser
+            playwright = self._playwright
+
+            self._browser = None
+            self._playwright = None
+
+            if browser is not None:
+                for context in browser.contexts: await context.close()
+
+        try:
+            if browser is not None: await browser.close()
+        finally:
+            if playwright is not None: await playwright.stop()
+
+    async def create_context_with_caller_as_owner(self, **options) -> AsyncGenerator[BrowserContext]:
+        """Create and automatically close an isolated browser context."""
+
+        browser = self._browser
+
+        if browser is None or not browser.is_connected():
+            raise RuntimeError("PlaywrightManager has not been started")
+
+        context = await browser.new_context(**options)
+
+        try:
+            yield context
+        finally:
+            await context.close()
+    
+    async def create_context_with_callee_as_owner(self, **options) -> BrowserContext:
+        browser = self._browser
+
+        if browser is None or not browser.is_connected():
+            raise RuntimeError("PlaywrightManager has not been started")
+        return await browser.new_context(**options)
 
 @dataclass
 class Challenge:
     id: str
-    title: str
-    description: str = ""
-    points: int = 0
-    category: str = "unknown"
-    prerequisite: Challenge | None = None
-    flag: str = ""
+    name: str
+    url: str
+    method: str
+    headers: dict
+    body: dict | None = None
 
 @dataclass
 class Campaign:
@@ -27,11 +91,19 @@ class Campaign:
     url: str
     status: str
     datetime: datetime
-    auth_path: Path
-    playwright_manager: PM
+    paths: dict[str, Path] = field(default_factory=dict)
     challenges: list[Challenge] = field(default_factory=list)
+    _logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__), init=False)
     _authenticated: bool = field(default=False, init=False)
     _browser_context: BrowserContext | None = field(default=None, init=False)
+    _lifecycle_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
+
+    def __post_init__(self):
+        self._auth_path = self.paths['playwright_auth'] / str(self.id)
+        self._db_filepath = self.paths['db']
+        self._auth_path.mkdir(parents=True, exist_ok=True)
+        if not self._db_filepath.exists():
+            raise FileNotFoundError(f"Database file not found at {self._db_filepath}. Ensure the database is initialized.")
 
     async def _save_state(self) -> None:
         """
@@ -40,10 +112,8 @@ class Campaign:
         Args:
             auth_path (Path): The path to the directory where the state file will be saved.
         """
-        if self._browser_context is None:
-            await self.playwright_manager.remove_context(self.id)
-        else:
-            await self.playwright_manager.set_context(self.id, self._browser_context)
+        # if self._browser_context is None: await self.playwright_manager.remove_context(self.id)
+        # else: await self.playwright_manager.set_context(self.id, self._browser_context)
         
     async def _load_state(self) -> None:
         """
@@ -52,10 +122,10 @@ class Campaign:
         Args:
             auth_path (Path): The path to the directory where the state file is located.
         """
-        context = await self.playwright_manager.get_context(self.id)
-        self._browser_context = context
+        # context = await self.playwright_manager.get_context(self.id)
+        # self._browser_context = context
 
-    def _update_status(self, conn: Connection, new_status: str) -> None:
+    def _update_status(self, new_status: str) -> None:
         """
         Update the status of the campaign in the database.
 
@@ -63,96 +133,173 @@ class Campaign:
             new_status (str): The new status to set for the campaign.
         """
         table_name = env("CAMPAIGNS_TABLE")[0]
-        with conn:
+        with sqlite3_connect(self._db_filepath) as conn:
             cursor = conn.cursor()
             cursor.execute("UPDATE {} SET status = ? WHERE id = ?".format(table_name), (new_status, self.id))
             conn.commit()
-        self.status = new_status
+            self.status = new_status
     
-    async def start(self, conn: Connection, p: PM, **options) -> None:
-        if self._browser_context is not None:
-            raise ValueError("Browser context already started. Perhaps restart the campaign")
-        self._browser_context = await p.create_context_with_callee_as_owner(**options)
-        if self._browser_context is None:
-            raise ValueError("Failed to create a browser context")
-        await self._save_state()
-        self._update_status(conn, "running")
+    async def start(self, p: PlaywrightManager, **options) -> None:
+        async with self._lifecycle_lock:
+            if self._browser_context is not None:
+                raise ValueError("Browser context already started. Perhaps restart the campaign")
+            self._browser_context = await p.create_context_with_callee_as_owner(**options)
+            if self._browser_context is None:
+                raise ValueError("Failed to create a browser context")
+            await self._save_state()
+            self._update_status("running")
         
-    async def stop(self, conn: Connection) -> None:
-        await self._load_state()
-        if self._browser_context is None:
-            raise ValueError("No browser context to stop. Perhaps start the campaign first")
-        self._browser_context = None
-        await self._save_state()
-        self._update_status(conn, "stopped")
-    
-    async def restart(self, conn: Connection, **options) -> None:
-        await self._load_state()
-        if self._browser_context is not None:
+    async def stop(self) -> None:
+        async with self._lifecycle_lock:
+            await self._load_state()
+            if self._browser_context is None:
+                raise ValueError("No browser context to stop. Perhaps start the campaign first")
             self._browser_context = None
             await self._save_state()
-        self._browser_context = await self.playwright_manager.create_context_with_callee_as_owner(**options)
-        if self._browser_context is None: raise ValueError("Failed to create a browser context")
-        await self._save_state()
-        self._update_status(conn, "running")
+            self._update_status("stopped")
     
-    async def pause(self, conn: Connection) -> BrowserContext:
-        await self._load_state()
-        if self._browser_context is None:
-            raise ValueError("No browser context to pause. Perhaps start the campaign first")
-        paused_context = self._browser_context
-        self._browser_context = None
-        self._update_status(conn, "paused")
-        return paused_context
+    async def restart(self, p: PlaywrightManager, **options) -> None:
+        async with self._lifecycle_lock:
+            await self._load_state()
+            if self._browser_context is not None:
+                self._browser_context = None
+                await self._save_state()
+            self._browser_context = await p.create_context_with_callee_as_owner(**options)
+            if self._browser_context is None: raise ValueError("Failed to create a browser context")
+            await self._save_state()
+            self._update_status("running")
     
-    async def resume(self, conn: Connection, paused_context: BrowserContext | None = None) -> None:
-        if self._browser_context is not None:
-            raise ValueError("Browser context already running. Perhaps pause the campaign first")
-        if paused_context is None: await self._load_state()
-        else: self._browser_context = paused_context
-        await self._save_state()
-        self._update_status(conn, "running")
+    async def pause(self) -> BrowserContext:
+        async with self._lifecycle_lock:
+            await self._load_state()
+            if self._browser_context is None:
+                raise ValueError("No browser context to pause. Perhaps start the campaign first")
+            paused_context = self._browser_context
+            self._browser_context = None
+            self._update_status("paused")
+            return paused_context
+    
+    async def resume(self, paused_context: BrowserContext | None = None) -> None:
+        async with self._lifecycle_lock:
+            if self._browser_context is not None:
+                raise ValueError("Browser context already running. Perhaps pause the campaign first")
+            if paused_context is None: await self._load_state()
+            else: self._browser_context = paused_context
+            await self._save_state()
+            self._update_status("running")
 
-    async def authenticate(self, conn: Connection, page_url: str, endpoint: tuple[str, dict|None],
+    def _normalize_request_body(self, body: dict, interpolated_values: dict) -> dict | str:
+        """
+        Normalize the request body by replacing placeholders with actual credential values.
+
+        Args:
+            body (dict): The original request body containing placeholders.
+            interpolated_values (dict): A dictionary containing the actual values to replace the placeholders.
+
+        Returns:
+            dict: The normalized request body with placeholders replaced by actual values.
+        """
+        normalized_body = {}
+        encoding = str(body.get("encoding", "json"))
+        fields = dict(body.get("fields", {}))
+        for key, value in fields.items():
+            # Key like "name" or "password"
+            if isinstance(value, dict) and "$flyingdutchman" in value:
+                # Value like {"$flyingdutchman": {"kind": "credentials", "name": "name"}}
+                sub_dict = dict(value["$flyingdutchman"])
+                if sub_dict["kind"] in interpolated_values:
+                    normalized_body[key] = interpolated_values[sub_dict["kind"]][sub_dict["name"]]
+                else:
+                    raise ValueError(f"Unknown kind '{sub_dict['kind']}' in request body normalization.")
+            else:
+                normalized_body[key] = value
+        if encoding == "form":
+            return '&&'.join(f"{k}={v}" for k, v in normalized_body.items())
+        if encoding == "query":
+            return '&'.join(f"{k}={v}" for k, v in normalized_body.items())
+        if encoding == "text":
+            return '\n'.join(f"{k}={v}" for k, v in normalized_body.items())
+        elif encoding == "json":
+            return normalized_body
+        else:
+            raise ValueError(f"Unsupported encoding type: {encoding}. Supported types are 'json' and 'form'.")
+
+    async def authenticate(self, page_url: str, endpoint: tuple[str, dict|None],
                            expected_codes: tuple[int, ...]) -> None:
         """
         Authenticate the campaign with a given browser context.
 
         Args:
-            url (str): The URL to send the authentication request to.
-            reqInit (dict): Optional dictionary containing request initialization parameters.
+            page_url (str): The URL of the page to authenticate.
+            endpoint (tuple[str, dict|None]): A tuple containing the endpoint URL and optional request initialization parameters.
+            expected_codes (tuple[int, ...]): A tuple of expected HTTP status codes for successful authentication.
+        Raises:
+            ValueError: If the browser context is not available, if the provided URL does not match
         """
-        await self._load_state()
-        if self._browser_context is None:
-            raise ValueError("No browser context provided. Perhaps restart the campaign")
-        table_name = env("CAMPAIGNS_TABLE")[0]
-        with conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT credentials FROM {} WHERE id = ?".format(table_name), (self.id,))
-            row = cursor.fetchone()
-            if row is None: raise ValueError(f"No credentials found for campaign id: {self.id}")
-            credentials: dict = json.loads(row[0])
-            reqInit = endpoint[1].copy() if endpoint[1] is not None else {}
-            body = str(reqInit.get('body', ''))
-            for key, value in credentials.items(): body = body.replace(f"{{{{{key}}}}}", value)
-            if re.search(r"\{\{[A-Za-z_][A-Za-z0-9_]*\}\}", body):
-                raise ValueError(f"Valid credentials keys: {list(credentials.keys())}")
-            reqInit['body'] = body
-            new_endpoint = (endpoint[0], reqInit)
-            if self._browser_context is None or self._browser_context.is_closed():
+        async with self._lifecycle_lock:
+            await self._load_state()
+            if self._browser_context is None:
                 raise ValueError("No browser context provided. Perhaps restart the campaign")
-            if urlparse(page_url).netloc != urlparse(self.url).netloc:
-                raise ValueError("The provided URL does not match the campaign's URL.")
-            page: Page | None = None
-            for p in self._browser_context.pages:
-                if p.url == page_url:
-                    if page is not None:
-                        raise ValueError(f"Multiple pages found with the same URL: {page_url}. Perhaps restart the campaign.")
-                    page = p
-            if page is None:
-                page = await self._browser_context.new_page()
-                resp = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
-            resp = await send_request(page, new_endpoint)
-            if resp["status"] not in expected_codes:
-                raise ValueError(f"Authentication failed ({resp['status']}), data: {resp['data'][:20]}")
-        await self._save_state()
+            table_name = env("CAMPAIGNS_TABLE")[0]
+            with sqlite3_connect(self._db_filepath) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT credentials FROM {} WHERE id = ?".format(table_name), (self.id,))
+                row = cursor.fetchone()
+                if row is None: raise ValueError(f"No credentials found for campaign id: {self.id}")
+                credentials: dict = json.loads(row[0])
+                reqInit = endpoint[1].copy() if endpoint[1] is not None else {}
+                body: dict | str = dict(reqInit.get('body', {})).copy()
+                body = self._normalize_request_body(body, {"credentials": credentials})
+                reqInit['body'] = body
+                new_endpoint = (endpoint[0], reqInit)
+                if self._browser_context is None or self._browser_context.is_closed():
+                    raise ValueError("No browser context provided. Perhaps restart the campaign")
+                if urlparse(page_url).netloc != urlparse(self.url).netloc:
+                    raise ValueError("The provided URL does not match the campaign's URL.")
+                page: Page | None = None
+                for p in self._browser_context.pages:
+                    if p.url == page_url:
+                        if page is not None:
+                            raise ValueError(f"Multiple pages have the same URL: {page_url}. Perhaps restart the campaign.")
+                        page = p
+                if page is None:
+                    page = await self._browser_context.new_page()
+                    resp = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
+                self._logger.debug(f"Cookies before authentication: {await page.context.cookies()}")
+                resp = await send_request(page, page_url, new_endpoint)
+                new_url = "https://architectural-presumptuously-jeanine.ngrok-free.dev/ctf/challenges"
+                await page.goto(new_url, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(5_000)
+                await page.screenshot(path=f"authenticated_campaign_{self.id}.png")
+                            
+                resp_ok = resp.get("ok")
+                if resp_ok is not None and not resp_ok:
+                    self._logger.warning(f"Failed to send HTTP request: Response data:"
+                                        f"{str(resp['data'])[:200]}")
+                    raise ValueError(f"Failed to send HTTP request.")
+                if resp["status"] not in expected_codes:
+                    self._logger.warning(f"Authentication failed ({resp['status']}). "
+                                       f"Expected codes: {expected_codes}. "
+                                       f"Response data: {str(resp['data'])[:200]}..."
+                                    )
+                    raise ValueError(f"Authentication failed ({resp['status']})")
+            await self._save_state()
+            self._authenticated = True
+
+@dataclass
+class CampaignManager:
+    _campaigns: dict[str, Campaign] = field(default_factory=dict, init=False)
+    _logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__), init=False)
+
+    def get_campaign(self, campaign_id: str) -> Campaign | None:
+        return self._campaigns.get(campaign_id, None)
+
+    def add_campaign(self, campaign: Campaign) -> None:
+        if campaign.id in self._campaigns:
+            raise ValueError(f"Campaign with id {campaign.id} already exists. Remove it first")
+        self._campaigns[str(campaign.id)] = campaign
+
+    def remove_campaign(self, campaign_id: str) -> None:
+        if campaign_id not in self._campaigns:
+            raise ValueError(f"Campaign with id {campaign_id} does not exist. Add it first")
+        del self._campaigns[campaign_id]
