@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 from flyingdutchman import playwright, DB_PATH
-from flyingdutchman.powderboy import configure_logger, env, sqlite3_connect
+from flyingdutchman.carpenter import configure_logger, env, sqlite3_connect
 from flyingdutchman.captain import triage as captain
 from flyingdutchman.navigator import triage as navigator
 
@@ -75,7 +75,7 @@ async def main():
                 {"method": "GET", 
                 "headers": {
                     "Content-Type": "application/json",
-                    'ngrok-skip-browser-warning': 'true'
+                    'ngrok-skip-browser-warning': '1'
                 }})
     scout_url_path = "/challenges"
     har_should_contain = ("challenges", "warmup", "pilot")

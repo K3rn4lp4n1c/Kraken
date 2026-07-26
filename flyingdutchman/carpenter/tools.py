@@ -1,12 +1,38 @@
 from . import LOGGER_HANDLER_MARKER
-from .extensions import fancyFormatter
 from pathlib import Path
+from contextlib import contextmanager
+from collections.abc import Generator
 from playwright.async_api import Page
+from urllib.parse import urlparse
+
 import os
 import logging
 import sqlite3
 
 def configure_logger(debug: bool = False) -> None:
+    class fancyFormatter(logging.Formatter):
+        """
+        Custom logging formatter to add colors and styles to log messages based on their severity level.
+        """
+        grey = "\x1b[38;21m"
+        yellow = "\x1b[33;21m"
+        red = "\x1b[31;21m"
+        bold_red = "\x1b[31;1m"
+        reset = "\x1b[0m"
+        fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+        FORMATS = {
+            logging.DEBUG: grey + fmt + reset,
+            logging.INFO: grey + fmt + reset,
+            logging.WARNING: yellow + fmt + reset,
+            logging.ERROR: red + fmt + reset,
+            logging.CRITICAL: bold_red + fmt + reset
+        }
+
+        def format(self, record):
+            log_fmt = self.FORMATS.get(record.levelno)
+            formatter = logging.Formatter(log_fmt)
+            return formatter.format(record)
     logger = logging.getLogger("flyingdutchman")
     logger.setLevel(logging.DEBUG if debug else logging.INFO)
 
@@ -53,16 +79,20 @@ def env(keys: str, defaults: str = '', delimiter: str = ",") -> tuple[str, ...]:
 
     return tuple(values)
 
-def sqlite3_connect(path: Path) -> sqlite3.Connection:
+@contextmanager
+def sqlite3_connect(path: Path) -> Generator[sqlite3.Connection]:
     """
     Establishes a connection to the SQLite3 database.
     Returns:
         sqlite3.Connection: A connection object to the SQLite3 database.
     """
     conn = sqlite3.connect(path)
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
-async def send_request(page: Page, endpoint: tuple[str, dict | None]) -> dict:
+async def send_request(page: Page, campaign_url: str, endpoint: tuple[str, dict | None]) -> dict:
         """
         Send a request to the campaign's URL using the provided browser context.
 
@@ -74,7 +104,11 @@ async def send_request(page: Page, endpoint: tuple[str, dict | None]) -> dict:
             dict: A dictionary containing the response status and data.
         """
         url = endpoint[0]
+        if urlparse(url).netloc != urlparse(campaign_url).netloc:
+            raise ValueError("The provided URL does not match the campaign's URL.")
         reqInit = endpoint[1] if len(endpoint) > 1 else {}
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Sending request to {url} with init: {reqInit}")
         response = await page.evaluate(
         """
         async ({ url, requestInit }) => {
