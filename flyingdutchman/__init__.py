@@ -1,6 +1,6 @@
 from fastmcp import FastMCP
 from pathlib import Path
-from flyingdutchman.powderboy import PlaywrightManager
+from flyingdutchman.carpenter import PlaywrightManager, CampaignManager
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
@@ -19,6 +19,8 @@ flyingdutchman = FastMCP(
 )
 
 playwright = PlaywrightManager()
+
+campaigns = CampaignManager()
 
 for dir_path in [ASSETS_DIRPATH, DB_DIRPATH, HAR_DIRPATH, PLAYWRIGHT_AUTH_DIRPATH]:
     Path.mkdir(dir_path, parents=True, exist_ok=True)
