@@ -269,10 +269,6 @@ class Campaign:
                     resp = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
                 self._logger.debug(f"Cookies before authentication: {await page.context.cookies()}")
                 resp = await send_request(page, page_url, new_endpoint)
-                new_url = "https://architectural-presumptuously-jeanine.ngrok-free.dev/ctf/challenges"
-                await page.goto(new_url, wait_until="domcontentloaded", timeout=60_000)
-                await page.wait_for_timeout(5_000)
-                await page.screenshot(path=f"authenticated_campaign_{self.id}.png")
                             
                 resp_ok = resp.get("ok")
                 if resp_ok is not None and not resp_ok:
