@@ -114,25 +114,27 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
 async def scout_campaign(cid: str, url: str, force: bool = False, headers: dict | None = None,
                         endpoints: list[tuple[str, dict]] | None = None) -> dict:
     """
-    Records a HAR file for a given campaign by visiting the provided URL.
-    If the HAR file already exists and force is set to True, it will overwrite the existing file.
-    It also checks if the provided URL matches the expected domain for the campaign.
-    If a page with the provided URL exists in the campaign's browser context, it will use that page.
-    Otherwise, it will create a new page. Multiple pages with the same URL will raise an error.
-    There are no tools to insert campaigns or select credentials so this is safe.
-    Requests to the provided endpoints will be sent after visiting the URL in form of fetch requests.
-    Responses will be recorded in a HAR file whose filename is a hash of the URL.
-    The HAR file will be stored in a directory named after the campaign ID.
+    Capture a HAR snapshot for a loaded campaign at `url`.
+
+    The campaign is paused while recording and then resumed. If `force` is
+    `False` and a HAR already exists for the URL hash, the existing HAR content
+    is returned instead of recording again.
+
+    The target URL must share scheme, host, and port with the campaign URL.
+    For each optional endpoint, only entries matching the same scheme, host,
+    and path as `url` are executed; non-matching endpoints are skipped.
 
     Args:
-        cid (str): The ID of the campaign.
-        url (str): The URL to visit for recording the HAR file.
-        force (bool): If True, overwrite the existing HAR file if it exists. Default is False.
-        headers (Optional(dict)): Optional dictionary containing request headers that will be set on the page request. Default is None.
-        endpoints (Optional(list[tuple[str, dict]])): A list of tuples with endpoint URLs as strings and their corresponding request initialization parameters as dictionaries. Default is an empty list.
+        cid (str): ID of a campaign that has already been loaded.
+        url (str): Page URL to open/record.
+        force (bool): Re-record even when a HAR file already exists.
+        headers (dict | None): Extra HTTP headers set on a newly created page.
+        endpoints (list[tuple[str, dict]] | None): Optional fetch requests in
+            `(endpoint_url, request_init)` format.
+
     Returns:
-        tuple[bool, str, str]:
-        A tuple containing a success status, a message, and the HAR content (if successful).
+        dict: Contains `success`, `message`, and `har_content`.
+        If `cid` is not loaded, returns `{"success": False, ...}` with empty HAR content.
     """
     campaign = campaigns.get_campaign(cid)
     if campaign is None:

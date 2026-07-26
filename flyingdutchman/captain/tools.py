@@ -35,12 +35,13 @@ def _get_campaigns() -> tuple[bool, str, list[dict]]:
 @captain.tool()
 def get_campaigns() -> dict:
     """
-    Campaigns are CTF events that The Flying Dutchman has, can, or will participate in.
-    This tool fetches the list of all campaigns from the database.
+    Fetch all campaigns from the database and annotate whether each one is
+    currently loaded in the in-memory campaign registry.
 
     Returns:
-        dict: This will contain the success status, a message and the campaigns list.
-        Campaigns contain the following fields: id, name, datetime, url, status
+        dict: Contains `success`, `message`, and `campaigns`.
+        Each campaign item includes `id`, `name`, `datetime`, `url`, `status`,
+        and `loaded`.
     """
     success, message, campaigns = _get_campaigns()
     return {"success": success, "message": message, "campaigns": campaigns }
@@ -76,14 +77,14 @@ def _load_campaigns_from_db(campaign_ids: list[str]) -> tuple[bool, str]:
 @captain.tool()
 def load_campaigns_from_db(campaign_ids: list[str]) -> dict:
     """
-    Loads campaigns into the CampaignManager based on their IDs.
-    NOTE: There are no tools to save campaigns to the database.
+    Load campaigns from the database into the in-memory campaign registry.
+    This is required before tools that operate on a loaded campaign instance.
 
     Args:
-        id (list[str]): A list of campaign IDs to load.
+        campaign_ids (list[str]): Campaign IDs to load.
 
     Returns:
-        dict: This will contain the success status and a message.
+        dict: Contains `success` and `message`.
     """
     success, message = _load_campaigns_from_db(campaign_ids)
     return {"success": success, "message": message}
@@ -131,23 +132,26 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | N
 @captain.tool()
 async def control_campaign_lifecycle(cid: str, action: str, options: dict | None = None) -> dict:
     """
-    Controls the lifecycle of a campaign. The following actions are supported:
-    - 'start': Starts the campaign. Options is passed up to its browser context creation
-    - 'pause': Pauses the campaign. No options are needed.
-    - 'resume': Resumes the campaign. Options is passed up to its browser context creation
-    - 'stop': Stops the campaign. No options are needed.
-    - 'restart': Restarts the campaign. Options is passed up to its browser context creation
-    For 'pause' and 'resume', storage state can be saved to and restored from a file.
-    By default, the contexts are returned as unserializable `BrowserContext` objects.
-    Calls to this tool will not return objects that cannot be serialized to JSON.
-    However, the storage state will be saved in the form `{campaign_id}.json` in the designated auth directory.
+    Control the lifecycle of a loaded campaign.
+
+    Supported actions:
+    - `start`: create a browser context and mark campaign as running.
+    - `pause`: detach the active context from the campaign and mark it paused.
+    - `resume`: reattach a paused context and mark it running.
+    - `stop`: close the active context and mark it stopped.
+    - `restart`: replace the active context with a new one and mark it running.
+
+    `options` are forwarded to browser-context creation for `start` and
+    `restart`.
 
     Args:
-        cid (str): The ID of the campaign.
-        action (str): The action to perform on the campaign. Can be 'start', 'pause', 'resume', 'stop', or 'restart'.
-        options (dict): Additional options to pass to `BrowserContext` creation function
+        cid (str): ID of a campaign that has already been loaded.
+        action (str): One of `start`, `pause`, `resume`, `stop`, or `restart`.
+        options (dict | None): Optional browser-context options.
+
     Returns:
-        dict: Contains a success status and a message indicating the result of the operation.
+        dict: Contains `success` and `message`.
+        If `cid` is not loaded, returns `{"success": False, "status": "unknown", ...}`.
     """
     campaign = campaigns.get_campaign(cid)
     if campaign is None:
@@ -184,37 +188,38 @@ async def _authenticate_campaign(campaign: Campaign, page_url: str, endpoint: tu
 async def authenticate_campaign(cid: str, page_url: str, endpoint: tuple[str, dict | None],
                                 expected_codes: tuple[int, ...]) -> dict:
     """
-    Authenticates a running campaign and stores the authentication state in the its browser context.
-    It uses the login page with the provided url if it exists in the browser context
-    or creates a new page if it doesn't.
-    The campaign must be running before authentication. The page remains open after this operation.
-    The request body should look like this:
+    Authenticate a loaded, running campaign by sending a request from a page
+    inside the campaign context.
+
+    The tool reuses an existing page matching `page_url` or creates one when
+    none exists. The campaign must already be running.
+
+    The request body schema is:
     ```
     {
-        "encoding": "form" | "json" | "query",
         "body": {
-            "name": {"credentials": "name"},
-            "password": {"credentials": "password"},
-            "nonce": "literal_nonce_value",
+            "encoding": "form" | "json" | "query" | "text",
+            "fields": {
+                "name": {"$flyingdutchman": {"kind": "credentials", "name": "name"}},
+                "password": {"$flyingdutchman": {"kind": "credentials", "name": "password"}},
+                "nonce": "literal_value"
+            }
         }
     }
     ```
-    Error messages are descriptive indicating what is expected and what is missing.
-    The `expected_codes` parameter is a tuple of expected HTTP status codes for a successful request.
-    If the response status code is not expected, the operation is signed off as a failure even if it actually worked.        
-    The URL in the `endpoint` must match the domain of the `page_url`. If it doesn't, a ValueError will be raised.
-    The `page_url` should be the login page of the campaign. The tool will navigate to this page and send the authentication request
-    using the provided `endpoint`. If the page with the `page_url` already exists in the campaign's browser context, it will use that page. Otherwise, it will create a new page. If multiple pages with the same `page_url` exist, a ValueError will be raised.
-    Refer to `scout_campaign` for a more complete example of how to handle these fields.
+
+    Fields marked with `$flyingdutchman` are interpolated from stored campaign
+    credentials. Endpoint URL must match the campaign origin used by `page_url`.
 
     Args:
-        - cid (str) : The ID of the campaign.
-        - page_url (str) : The URL of the page to navigate to for authentication. This should be the login page of the campaign.
-        - endpoint (tuple[str, dict | None]) : Contains the URL to send the login request to and optional request initialization parameters.
-        - expected_codes (tuple[int, ...]) : Expected HTTP status codes for a successful request. Refer to `scout_campaign` when you require something more descriptive.
+        - cid (str): ID of a campaign that has already been loaded.
+        - page_url (str): Page URL used to perform authentication.
+        - endpoint (tuple[str, dict | None]): `(url, request_init)` for the request.
+        - expected_codes (tuple[int, ...]): HTTP status codes considered successful.
 
     Returns:
-        dict: Contains a success status and a message indicating the result of the operation.
+        dict: Contains `success` and `message`.
+        If `cid` is not loaded, returns `{"success": False, "status": "unknown", ...}`.
     """
     campaign = campaigns.get_campaign(cid)
     if campaign is None:
