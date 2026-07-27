@@ -1,11 +1,12 @@
 from __future__ import annotations
 from pathlib import Path
 from datetime import datetime
+from tldextract import extract
 from urllib.parse import urlparse, urlencode
 from dataclasses import dataclass, field
 from collections.abc import AsyncGenerator
 from playwright.async_api import Playwright, Browser, BrowserContext, Page, async_playwright
-from .tools import send_request, sqlite3_connect, env
+from .tools import send_request, sqlite3_connect, env, does_url_match_campaign
 
 import asyncio
 import json
@@ -232,12 +233,7 @@ class Campaign:
                 new_endpoint = (endpoint[0], reqInit)
                 if self._browser_context is None or self._browser_context.is_closed():
                     raise ValueError("No browser context provided. Perhaps restart the campaign")
-                alike = (
-                    urlparse(page_url).scheme == urlparse(self.url).scheme and
-                    urlparse(page_url).netloc == urlparse(self.url).netloc and
-                    urlparse(page_url).port == urlparse(self.url).port
-                )
-                if not alike:
+                if not does_url_match_campaign(page_url, self.url):
                     raise ValueError("The provided URL does not match the campaign's URL.")
                 page: Page | None = None
                 for p in self._browser_context.pages:

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import os
 import logging
 import sqlite3
+import tldextract
 
 def configure_logger(debug: bool = False) -> None:
     class fancyFormatter(logging.Formatter):
@@ -92,6 +93,23 @@ def sqlite3_connect(path: Path) -> Generator[sqlite3.Connection]:
     finally:
         conn.close()
 
+def does_url_match_campaign(url: str, camp_url: str) -> bool:
+    """
+    Check if the provided URL matches the campaign's URL based on scheme, registered domain, and port.
+
+    Args:
+        url (str): The URL to check.
+        campaign_url (str): The campaign's URL to compare against.
+
+    Returns:
+        bool: True if the URLs match, False otherwise.
+    """
+    return (
+        urlparse(url).scheme == urlparse(camp_url).scheme and
+        tldextract.extract(url).registered_domain == tldextract.extract(camp_url).registered_domain and
+        urlparse(url).port == urlparse(camp_url).port
+    )
+
 async def send_request(page: Page, campaign_url: str, endpoint: tuple[str, dict | None]) -> dict:
         """
         Send a request to the campaign's URL using the provided browser context.
@@ -104,12 +122,7 @@ async def send_request(page: Page, campaign_url: str, endpoint: tuple[str, dict 
             dict: A dictionary containing the response status and data.
         """
         url = endpoint[0]
-        alike = (
-            urlparse(url).scheme == urlparse(campaign_url).scheme and
-            urlparse(url).netloc == urlparse(campaign_url).netloc and
-            urlparse(url).port == urlparse(campaign_url).port
-        )
-        if not alike:
+        if not does_url_match_campaign(url, campaign_url):
             raise ValueError("The provided URL does not match the campaign's URL.")
         reqInit = endpoint[1] if len(endpoint) > 1 else {}
         response = await page.evaluate(

@@ -3,7 +3,7 @@ from pathlib import Path
 from datetime import datetime
 from playwright.async_api import Page, BrowserContext
 from urllib.parse import urlparse
-from flyingdutchman.carpenter import Campaign, send_request
+from flyingdutchman.carpenter import Campaign, send_request, does_url_match_campaign
 from flyingdutchman import campaigns, HAR_DIRPATH
 
 import logging
@@ -54,12 +54,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
     recording_har = False
     try:
         parsed_url = urlparse(url)
-        alike = (
-            parsed_url.scheme == urlparse(campaign.url).scheme and
-            parsed_url.netloc == urlparse(campaign.url).netloc and
-            parsed_url.port == urlparse(campaign.url).port
-        )
-        if not alike:
+        if not does_url_match_campaign(url, campaign.url):
             return False, f"'{url}' does not match expected domain for campaign {campaign.id}", "", 0
         har_dir = HAR_DIRPATH / str(campaign.id)
         har_path = hashlib.md5(parsed_url.geturl().encode()).hexdigest() + ".har"
@@ -93,12 +88,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
         
         if endpoints is None: endpoints = []
         for endpoint in endpoints:
-            alike = (
-                urlparse(endpoint[0]).scheme == parsed_url.scheme and
-                urlparse(endpoint[0]).netloc == parsed_url.netloc and
-                urlparse(endpoint[0]).port == parsed_url.port
-            )
-            if not alike:
+            if not does_url_match_campaign(endpoint[0], campaign.url):
                 logger.warning(f"'{endpoint[0]}' does not match expected domain for campaign '{campaign.id}'. Skipping...")
                 continue
             await send_request(page, url, endpoint)
