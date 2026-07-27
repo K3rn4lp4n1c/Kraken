@@ -224,8 +224,8 @@ async def authenticate_campaign(cid: str, page_url: str, endpoint: tuple[str, di
     Ensure that `$flyingdutchman` is only present in `body.fields`.
     Otherwise, the request body is sent as-is.
 
-    If a page with the same URL already exists in the campaign's context, it is reused and
-    the resulting HAR will not contain navigational requests to the URL. Or else, a new page is made.
+    If a page with the same URL already exists in the campaign's context, it is reused.
+    Or else, a new page is made.
     An already existing page may not have the headers and cookies that might need to be set.
     Conversely, a new page may not have the cookies that an existing page has.
     Restart the campaign if you need a new page or add dummy query parameters to the URL.
