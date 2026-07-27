@@ -157,6 +157,7 @@ async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: 
     Their values are capped at the length and size of the HAR content respectively.
     They are applied regardless of whether the HAR content is newly recorded or already exists.
     This will mean that sliced HAR content is likely not valid JSON.
+    Slicing may also split at multibyte characters.
 
     Args:
         cid (str): ID of a campaign that has already been loaded.
