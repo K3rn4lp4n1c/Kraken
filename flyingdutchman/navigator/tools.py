@@ -94,8 +94,8 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
     except ValueError as ve:
         logger.error("Error while scouting campaign: %s", str(ve))
         return False, f"Error: {str(ve)}", ""
-    except Exception as e:
-        logger.exception("Error while scouting campaign: %s", str(e))
+    except Exception:
+        logger.exception("Error while scouting campaign")
         return False, f"Internal Server Error in fetching campaigns", ""
     finally:
         if context is not None:
@@ -111,36 +111,44 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
                 logger.exception("Failed to resume campaign")
 
 @navigator.tool()
-async def scout_campaign(cid: str, url: str, force: bool = False, headers: dict | None = None,
+async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: dict | None = None,
                         endpoints: list[tuple[str, dict]] | None = None) -> dict:
     """
-    Capture a HAR snapshot for a loaded campaign at `url`.
+    Capture a HAR snapshot for a loaded campaign at `url` without closing the campaign's context.
 
-    The campaign is paused while recording and then resumed. If `force` is
-    `False` and a HAR already exists for the URL hash, the existing HAR content
-    is returned instead of recording again.
+    If `force` is `False` and a HAR already exists for the URL hash, the existing HAR content
+    is returned instead of recording again. The capture time is also returned in the message.
 
-    The target URL must share scheme, host, and port with the campaign URL.
-    For each optional endpoint, only entries matching the same scheme, host,
-    and path as `url` are executed; non-matching endpoints are skipped.
+    HAR recording is done in "full" mode, which captures all headers, bodies, and cookies.
+    HAR contents are in "embed" state, which puts all bodies inline in the HAR file.
+    The file is saved in the campaign's HAR directory with a name based on the MD5 hash of the URL.
+
+    If a page with the same URL already exists in the campaign's context, it is reused and
+    the resulting HAR will not contain navigational requests to the URL. Or else, a new page is made.
+    An already existing page may not have the headers and cookies that might need to be set.
+    Conversely, a new page may not have the cookies that an existing page has.
+    Restart the campaign if you need a new page or add dummy query parameters to the URL.
 
     Args:
         cid (str): ID of a campaign that has already been loaded.
-        url (str): Page URL to open/record.
-        force (bool): Re-record even when a HAR file already exists.
-        headers (dict | None): Extra HTTP headers set on a newly created page.
-        endpoints (list[tuple[str, dict]] | None): Optional fetch requests in
-            `(endpoint_url, request_init)` format.
+        page_url (str): Page URL to open/record.
+        force (bool = False): Re-record even when a HAR file already exists.
+        headers (dict | None = None): Extra HTTP headers set on a newly created page.
+        endpoints (list[tuple[str, dict]] | None = None): Fetch requests in `(url, request_init)` format.
 
     Returns:
         dict: Contains `success`, `message`, and `har_content`.
-        If `cid` is not loaded, returns `{"success": False, ...}` with empty HAR content.
+    
+    Raises:
+        If the campaign is not found, try to load it first. Refer to `load_campaign_from_db`.
+        If the page's scheme, domain, or port does not match the campaign's, the process is aborted.
+        If at least two pages have the same URL, the process is aborted. This is unlikely.
     """
     campaign = campaigns.get_campaign(cid)
     if campaign is None:
         return {"success": False, "message": f"No campaign found with id: {cid}", "har_content": ""}
     if headers is None: headers = {}
-    success, message, har_content = await _scout_campaign(campaign, url, force, headers, endpoints)
+    success, message, har_content = await _scout_campaign(campaign, page_url, force, headers, endpoints)
     return {"success": success, "message": message, "har_content": har_content}
 
 async def triage(campaign: Campaign, url: str, endpoint: tuple[str, dict]) -> tuple[str, list[str], list[bool]]:
