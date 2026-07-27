@@ -105,26 +105,6 @@ class Campaign:
         if not self._db_filepath.exists():
             raise FileNotFoundError(f"Database file not found at {self._db_filepath}. Ensure the database is initialized.")
 
-    async def _save_state(self) -> None:
-        """
-        Save the state of the campaign's browser context to a file.
-
-        Args:
-            auth_path (Path): The path to the directory where the state file will be saved.
-        """
-        # if self._browser_context is None: await self.playwright_manager.remove_context(self.id)
-        # else: await self.playwright_manager.set_context(self.id, self._browser_context)
-        
-    async def _load_state(self) -> None:
-        """
-        Load the state of the campaign's browser context from a file.
-
-        Args:
-            auth_path (Path): The path to the directory where the state file is located.
-        """
-        # context = await self.playwright_manager.get_context(self.id)
-        # self._browser_context = context
-
     def _update_status(self, new_status: str) -> None:
         """
         Update the status of the campaign in the database.
@@ -143,37 +123,36 @@ class Campaign:
         async with self._lifecycle_lock:
             if self._browser_context is not None:
                 raise ValueError("Browser context already started. Perhaps restart the campaign")
+            if self.status == "paused":
+                raise ValueError("Cannot start a paused campaign. Use resume instead")
             self._browser_context = await p.create_context_with_callee_as_owner(**options)
             if self._browser_context is None:
                 raise ValueError("Failed to create a browser context")
-            await self._save_state()
             self._update_status("running")
         
     async def stop(self) -> None:
         async with self._lifecycle_lock:
-            await self._load_state()
+            if self.status == "paused":
+                raise ValueError("Cannot stop a paused campaign. Use resume first")
             if self._browser_context is None:
                 raise ValueError("No browser context to stop. Perhaps start the campaign first")
             await self._browser_context.close()
             self._browser_context = None
-            await self._save_state()
             self._update_status("stopped")
     
     async def restart(self, p: PlaywrightManager, **options) -> None:
         async with self._lifecycle_lock:
-            await self._load_state()
+            if self.status == "paused":
+                raise ValueError("Cannot restart a paused campaign. Use resume first")
             if self._browser_context is not None:
                 await self._browser_context.close()
                 self._browser_context = None
-                await self._save_state()
             self._browser_context = await p.create_context_with_callee_as_owner(**options)
             if self._browser_context is None: raise ValueError("Failed to create a browser context")
-            await self._save_state()
             self._update_status("running")
     
     async def pause(self) -> BrowserContext:
         async with self._lifecycle_lock:
-            await self._load_state()
             if self._browser_context is None:
                 raise ValueError("No browser context to pause. Perhaps start the campaign first")
             paused_context = self._browser_context
@@ -181,13 +160,11 @@ class Campaign:
             self._update_status("paused")
             return paused_context
     
-    async def resume(self, paused_context: BrowserContext | None = None) -> None:
+    async def resume(self, paused_context: BrowserContext) -> None:
         async with self._lifecycle_lock:
             if self._browser_context is not None:
                 raise ValueError("Browser context already running. Perhaps pause the campaign first")
-            if paused_context is None: await self._load_state()
             else: self._browser_context = paused_context
-            await self._save_state()
             self._update_status("running")
 
     def _normalize_request_body(self, body: dict, interpolated_values: dict) -> str:
@@ -239,7 +216,6 @@ class Campaign:
             ValueError: If the browser context is not available, if the provided URL does not match
         """
         async with self._lifecycle_lock:
-            await self._load_state()
             if self._browser_context is None:
                 raise ValueError("No browser context provided. Perhaps restart the campaign")
             table_name = env("CAMPAIGNS_TABLE")[0]
@@ -285,7 +261,6 @@ class Campaign:
                                        f"Response data: {str(resp['data'])[:200]}..."
                                     )
                     raise ValueError(f"Authentication failed ({resp['status']}): {str(resp['data'])}...")
-            await self._save_state()
             self._authenticated = True
 
 @dataclass

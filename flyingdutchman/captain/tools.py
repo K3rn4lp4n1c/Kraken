@@ -35,13 +35,15 @@ def _get_campaigns() -> tuple[bool, str, list[dict]]:
 @captain.tool()
 def get_campaigns() -> dict:
     """
-    Fetch all campaigns from the database and annotate whether each one is
-    currently loaded in the in-memory campaign registry.
+    Fetch all campaigns from the database and annotate whether each one is currently loaded
+    in the in-memory campaign registry.
 
     Returns:
         dict: Contains `success`, `message`, and `campaigns`.
-        Each campaign item includes `id`, `name`, `datetime`, `url`, `status`,
-        and `loaded`.
+        Each campaign item includes `id`, `name`, `datetime`, `url`, `status`, and `loaded`.
+
+    Raises:
+        If you get an empty list of campaigns, the error message should indicate what happened.
     """
     success, message, campaigns = _get_campaigns()
     return {"success": success, "message": message, "campaigns": campaigns }
@@ -71,17 +73,20 @@ def _load_campaigns_from_db(campaign_ids: list[str]) -> tuple[bool, str]:
                 campaigns.add_campaign(campaign)
         return True, f"Campaigns {', '.join(campaign_ids)} loaded successfully."
     except Exception as e:
-        logger.exception("Error loading campaigns from database: %s", str(e))
+        logger.exception("Error loading campaigns from database")
         return False, f"Error loading campaigns from database: {str(e)}"
 
 @captain.tool()
 def load_campaigns_from_db(campaign_ids: list[str]) -> dict:
     """
     Load campaigns from the database into the in-memory campaign registry.
-    This is required before tools that operate on a loaded campaign instance.
+    This is required before actions on campaigns can be performed.
+    There are no available tools to remove campaigns from the campaign registry.
+    Loading a campaign ID that's already loaded fails without replacement or reloading.
+    Therefore, the only way to reload a campaign is to restart the Flying Dutchman.
 
     Args:
-        campaign_ids (list[str]): Campaign IDs to load.
+        campaign_ids (list[str]): Campaign IDs to load. IDs are strings here not integers.
 
     Returns:
         dict: Contains `success` and `message`.
@@ -89,13 +94,10 @@ def load_campaigns_from_db(campaign_ids: list[str]) -> dict:
     success, message = _load_campaigns_from_db(campaign_ids)
     return {"success": success, "message": message}
 
-async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | None = None,
-                                    ctxts: list | None = None, **options) -> tuple[bool, str]:
+async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | None = None,**options) -> tuple[bool, str]:
     """
     Controls the lifecycle of a campaign. The following actions are supported:
     - 'start': Starts the campaign. Options is passed up to its browser context creation
-    - 'pause': Pauses the campaign. No options are needed.
-    - 'resume': Resumes the campaign. Options is passed up to its browser context creation
     - 'stop': Stops the campaign. No options are needed.
     - 'restart': Restarts the campaign. Options is passed up to its browser context creation
 
@@ -113,12 +115,6 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | N
         if action == 'start':
             if p is None: raise ValueError("PlaywrightManager instance must be provided for 'start'")
             await campaign.start(p, **options)
-        elif action == 'pause':
-            ctx = await campaign.pause()
-            if ctxts is not None: ctxts.append(ctx)
-        elif action == 'resume':
-            ctx = ctxts[0] if ctxts and len(ctxts) > 0 else None
-            await campaign.resume(ctx)
         elif action == 'stop': await campaign.stop()
         elif action == 'restart':
             if p is None: raise ValueError("PlaywrightManager instance must be provided for 'restart'")
@@ -126,8 +122,8 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | N
         else: raise ValueError(f"Unsupported action: {action}")
         return True, f"{action} on Campaign '{campaign.id}' was successfully."
     except Exception as e:
-        logger.exception("Error controlling campaign lifecycle: %s", str(e))
-        return False, f"Internal Server Error in controlling campaign lifecycle"
+        logger.exception("Error controlling campaign lifecycle")
+        return False, f"Internal Server Error in controlling campaign lifecycle: {str(e)}"
 
 @captain.tool()
 async def control_campaign_lifecycle(cid: str, action: str, options: dict | None = None) -> dict:
@@ -136,22 +132,32 @@ async def control_campaign_lifecycle(cid: str, action: str, options: dict | None
 
     Supported actions:
     - `start`: create a browser context and mark campaign as running.
-    - `pause`: detach the active context from the campaign and mark it paused.
-    - `resume`: reattach a paused context and mark it running.
     - `stop`: close the active context and mark it stopped.
     - `restart`: replace the active context with a new one and mark it running.
+    `options` are forwarded to browser-context creation for `start` and `restart`.
 
-    `options` are forwarded to browser-context creation for `start` and
-    `restart`.
+    Unsupported actions:
+    - `pause`: detach the active context from the campaign and mark it paused.
+    - `resume`: reattach a paused context and mark it running.
+    
+    `pause` and `resume` are unsupported. This is because if they had been implemented:
+    - They require an unserializable context to be passed in from the tool call. Impossible.
+    - `pause` would need to hold some operational campaign lock what only `resume` can release.
+    The lock is unbuilt and probably unnecessary but that's the designer's problem
 
     Args:
         cid (str): ID of a campaign that has already been loaded.
-        action (str): One of `start`, `pause`, `resume`, `stop`, or `restart`.
-        options (dict | None): Optional browser-context options.
+        action (str): One of `start`, `stop`, or `restart`.
+        options (dict | None = None): Optional browser-context options.
 
     Returns:
         dict: Contains `success` and `message`.
-        If `cid` is not loaded, returns `{"success": False, "status": "unknown", ...}`.
+    
+    Raises:
+        If the campaign is not loaded, try to load it first. Refer to `load_campaigns_from_db`.
+        If the `PlaywrightManager` instance is not up, check The Flying Dutchman for server errors.
+        If the `action` is unsupported, the error message will indicate that.
+        If no valid action can change the status, try again or check the Flying Dutchman for errors.
     """
     campaign = campaigns.get_campaign(cid)
     if campaign is None:
@@ -263,15 +269,14 @@ async def triage(cid: str) -> tuple[Campaign | None, list[str], list[bool]]:
 
     checklist.append("Campaigns Lifecycle Control was successful")
     try:
-        ctxts = []
         if campaign is None: raise Exception("Campaign is None, cannot control lifecycle")
         await _control_campaign_lifecycle(campaign, "start", playwright)
         if campaign.status != "running":
             raise Exception(f"Expected status 'running', got '{campaign.status}'")
-        await _control_campaign_lifecycle(campaign, "pause", ctxts=ctxts)
+        ctx = await campaign.pause()
         if campaign.status != "paused":
             raise Exception(f"Expected status 'paused', got '{campaign.status}'")
-        await _control_campaign_lifecycle(campaign, "resume", ctxts=ctxts)
+        await campaign.resume(ctx)
         if campaign.status != "running":
             raise Exception(f"Expected status 'running', got '{campaign.status}'")
         await _control_campaign_lifecycle(campaign, "stop")
