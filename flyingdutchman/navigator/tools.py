@@ -9,8 +9,25 @@ from flyingdutchman import campaigns, HAR_DIRPATH
 import logging
 import hashlib
 
+def _slice_har_content(har_content: str, offset: int, limit: int) -> str:
+    """
+    Slices the HAR content based on the provided offset and limit.
+
+    Args:
+        har_content (str): The original HAR content.
+        offset (int): The starting index from which to slice the content.
+        limit (int): The maximum number of characters to include in the sliced content.
+
+    Returns:
+        str: The sliced HAR content.
+    """
+    offset = max(0, min(offset, len(har_content)))
+    limit = max(0, min(limit, len(har_content) - offset))
+    return har_content.encode('utf-8')[offset:offset + limit].decode('utf-8', errors='ignore')
+
 async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: dict | None = None,
-                        endpoints: list[tuple[str, dict]] | None = None) -> tuple[bool, str, str]:
+                        endpoints: list[tuple[str, dict]] | None = None,
+                        offset: int = 0, limit: int = 150_000) -> tuple[bool, str, str, int]:
     """
     Records a HAR file for a given campaign by visiting the provided URL.
     If the HAR file already exists and force is set to True, it will overwrite the existing file.
@@ -23,12 +40,14 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
         campaign (Campaign): The Campaign object for which to record the HAR file.
         url (str): The URL to visit for recording the HAR file.
         force (bool): If True, overwrite the existing HAR file if it exists. Default is False.
-        headers (Optional(dict)): Optional dictionary containing request headers that will be set on the page request. Default is None.
-        endpoints (Optional(list[tuple[str, dict]])): A list of tuples with endpoint URLs and their corresponding request initialization parameters. Default is an empty list.
+        headers (dict | None): Optional HTTP headers to set on the page. Default is None.
+        endpoints (list[tuple[str, dict]] | None): Optional list of endpoints to send fetch requests to after visiting the URL. Each endpoint is a tuple of (url, request_init).
+        offset (int): Offset for the HAR content to return. Default is 0.
+        limit (int): Limit for the HAR content to return. Default is 150000.
 
     Returns:
-        tuple[bool, str, str]:
-        A tuple containing a success status, a message, and the HAR content (if successful).
+        tuple[bool, str, str, int]:
+        A tuple containing a success status, a message, the HAR content (if successful), and the size of the HAR content.
     """
     logger = logging.getLogger(__name__)
     context: BrowserContext | None = None
@@ -41,7 +60,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
             parsed_url.port == urlparse(campaign.url).port
         )
         if not alike:
-            return False, f"'{url}' does not match expected domain for campaign id: {campaign.id}", ""
+            return False, f"'{url}' does not match expected domain for campaign {campaign.id}", "", 0
         har_dir = HAR_DIRPATH / str(campaign.id)
         har_path = hashlib.md5(parsed_url.geturl().encode()).hexdigest() + ".har"
         Path.mkdir(har_dir, parents=True, exist_ok=True)
@@ -49,8 +68,9 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
         if har_file_path.exists() and not force:
             m_timestamp = har_file_path.stat().st_mtime
             m_time = datetime.fromtimestamp(m_timestamp).strftime('%Y-%m-%d %H:%M:%S')
-            har_content = har_file_path.read_text(encoding='utf-8')
-            return True, f"Campaign '{campaign.id}' already scouted at {m_time}.", har_content
+            har_size = har_file_path.stat().st_size
+            har_content = _slice_har_content(har_file_path.read_text(encoding='utf-8'), offset, limit)
+            return True, f"Campaign {campaign.id} already scouted at {m_time}.", har_content, har_size
         har_file_path.unlink(missing_ok=True)
         context = await campaign.pause()
         page: Page | None = None
@@ -88,15 +108,16 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
         context = None
         recording_har = False
         if not har_file_path.exists():
-            return False, f"Failed to record HAR file for campaign '{campaign.id}'.", ""
-        har_content = har_file_path.read_text(encoding='utf-8')
-        return True, f"Campaign '{campaign.id}' scouted successfully.", har_content
+            return False, f"Failed to record HAR file for campaign '{campaign.id}'.", "", 0
+        har_size = har_file_path.stat().st_size
+        har_content = _slice_har_content(har_file_path.read_text(encoding='utf-8'), offset, limit)
+        return True, f"Campaign '{campaign.id}' scouted successfully.", har_content, har_size
     except ValueError as ve:
         logger.error("Error while scouting campaign: %s", str(ve))
-        return False, f"Error: {str(ve)}", ""
+        return False, f"Error: {str(ve)}", "", 0
     except Exception:
         logger.exception("Error while scouting campaign")
-        return False, f"Internal Server Error in fetching campaigns", ""
+        return False, f"Internal Server Error in fetching campaigns", "", 0
     finally:
         if context is not None:
             if recording_har:
@@ -112,7 +133,8 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
 
 @navigator.tool()
 async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: dict | None = None,
-                        endpoints: list[tuple[str, dict]] | None = None) -> dict:
+                        endpoints: list[tuple[str, dict]] | None = None,
+                        offset: int = 0, limit: int = 150_000) -> dict:
     """
     Capture a HAR snapshot for a loaded campaign at `url` without closing the campaign's context.
 
@@ -129,15 +151,25 @@ async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: 
     Conversely, a new page may not have the cookies that an existing page has.
     Restart the campaign if you need a new page or add dummy query parameters to the URL.
 
+    Offsets and limits are often for clients with constraints on the max output size from servers.
+    While constraints may not apply to LLMs themselves, calls to servers are heavily abstracted.
+    In short, use them to avoid sending too much data to the server at once
+    Their values are capped at the length and size of the HAR content respectively.
+    They are applied regardless of whether the HAR content is newly recorded or already exists.
+    This will mean that sliced HAR content is likely not valid JSON.
+
     Args:
         cid (str): ID of a campaign that has already been loaded.
         page_url (str): Page URL to open/record.
         force (bool = False): Re-record even when a HAR file already exists.
         headers (dict | None = None): Extra HTTP headers set on a newly created page.
         endpoints (list[tuple[str, dict]] | None = None): Fetch requests in (url (str), request_init (dict | None)) format.
+        offset (int = 0): Offset for the HAR content to return. Default is 0.
+        limit (int = 150000): Limit for the HAR content to return. Default is 150000.
 
     Returns:
-        dict: Contains `success`, `message`, and `har_content`.
+        dict: Contains `success`, `message`, `har_content` and `har_size`.
+        `har_size` is the size of the original HAR content before applying offset and limit.
     
     Raises:
         If the campaign is not found, try to load it first. Refer to `load_campaign_from_db`.
@@ -148,10 +180,12 @@ async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: 
     if campaign is None:
         return {"success": False, "message": f"No campaign found with id: {cid}", "har_content": ""}
     if headers is None: headers = {}
-    success, message, har_content = await _scout_campaign(campaign, page_url, force, headers, endpoints)
-    return {"success": success, "message": message, "har_content": har_content}
+    success, message, har_content, size_of_har = await _scout_campaign(
+        campaign, page_url, force, headers, endpoints, offset, limit
+    )
+    return {"success": success, "message": message, "har_content": har_content, "size_of_har": size_of_har}
 
-async def triage(campaign: Campaign, url: str, endpoint: tuple[str, dict]) -> tuple[str, list[str], list[bool]]:
+async def triage(campaign: Campaign, url: str, endt: tuple[str, dict]) -> tuple[str, list[str], list[bool]]:
     logger = logging.getLogger(__name__)
     checklist: list[str] = []
     checks: list[bool] = []
@@ -159,7 +193,7 @@ async def triage(campaign: Campaign, url: str, endpoint: tuple[str, dict]) -> tu
 
     checklist.append("Scouting the campaign")
     try:
-        success, message, har = await _scout_campaign(campaign, url, True, endpoints=[endpoint])
+        success, message, har, _ = await _scout_campaign(campaign, url, True, endpoints=[endt])
         if not success: raise Exception(message)
         checks.append(True)
     except Exception as e:
