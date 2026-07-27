@@ -240,7 +240,7 @@ async def authenticate_campaign(cid: str, page_url: str, endpoint: tuple[str, di
     Args:
         cid (str): ID of a campaign that has already been loaded.
         page_url (str): Page URL used to perform authentication.
-        endpoint (tuple[str, dict | None]): `(url, request_init)` for the request.
+        endpoint (tuple[str, dict | None]): (url (str), request_init (dict | None)) for the request.
         expected_codes (tuple[int, ...]): HTTP status codes considered successful.
 
     Returns:

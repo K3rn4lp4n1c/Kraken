@@ -134,7 +134,7 @@ async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: 
         page_url (str): Page URL to open/record.
         force (bool = False): Re-record even when a HAR file already exists.
         headers (dict | None = None): Extra HTTP headers set on a newly created page.
-        endpoints (list[tuple[str, dict]] | None = None): Fetch requests in `(url, request_init)` format.
+        endpoints (list[tuple[str, dict]] | None = None): Fetch requests in (url (str), request_init (dict | None)) format.
 
     Returns:
         dict: Contains `success`, `message`, and `har_content`.
