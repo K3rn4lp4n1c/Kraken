@@ -31,7 +31,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
     """
     Records a HAR file for a given campaign by visiting the provided URL.
     If the HAR file already exists and force is set to True, it will overwrite the existing file.
-    Ensure the provided URL matches the expected domain for the campaign.
+    Ensure the provided URL matches the expected root domain for the campaign.
     There are no tools to insert campaigns or select credentials.
     Requests to the provided endpoints will be sent after visiting the URL in form of fetch requests
     Responses will be recorded in the HAR file.
@@ -55,7 +55,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
     try:
         parsed_url = urlparse(url)
         if not does_url_match_campaign(url, campaign.url):
-            return False, f"'{url}' does not match expected domain for campaign {campaign.id}", "", 0
+            return False, f"'{url}' does not match expected root domain for campaign {campaign.id}", "", 0
         har_dir = HAR_DIRPATH / str(campaign.id)
         har_path = hashlib.md5(parsed_url.geturl().encode()).hexdigest() + ".har"
         Path.mkdir(har_dir, parents=True, exist_ok=True)
@@ -89,7 +89,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
         if endpoints is None: endpoints = []
         for endpoint in endpoints:
             if not does_url_match_campaign(endpoint[0], campaign.url):
-                logger.warning(f"'{endpoint[0]}' does not match expected domain for campaign '{campaign.id}'. Skipping...")
+                logger.warning(f"'{endpoint[0]}' does not match expected root domain for campaign '{campaign.id}'. Skipping...")
                 continue
             await send_request(page, url, endpoint)
             await page.wait_for_timeout(1_000)
@@ -164,7 +164,7 @@ async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: 
     
     Raises:
         If the campaign is not found, try to load it first. Refer to `load_campaign_from_db`.
-        If the page's scheme, domain, or port does not match the campaign's, the process is aborted.
+        If the `page_url`'s scheme, root domain, or port does not match the campaign's, the process is aborted.
         If at least two pages have the same URL, the process is aborted. This is unlikely.
     """
     campaign = campaigns.get_campaign(cid)

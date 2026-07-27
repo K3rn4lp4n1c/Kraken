@@ -1,8 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from datetime import datetime
-from tldextract import extract
-from urllib.parse import urlparse, urlencode
+from urllib.parse import urlencode
 from dataclasses import dataclass, field
 from collections.abc import AsyncGenerator
 from playwright.async_api import Playwright, Browser, BrowserContext, Page, async_playwright
