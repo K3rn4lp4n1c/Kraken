@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from flyingdutchman.carpenter import Campaign, send_request, does_url_match_campaign
 from flyingdutchman import campaigns, HAR_DIRPATH
 
+import asyncio
 import logging
 import hashlib
 
@@ -105,7 +106,7 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
     except ValueError as ve:
         logger.error("Error while scouting campaign: %s", str(ve))
         return False, f"Error: {str(ve)}", "", 0
-    except Exception:
+    except (Exception, asyncio.CancelledError, asyncio.TimeoutError) as e:
         logger.exception("Error while scouting campaign")
         return False, f"Internal Server Error in fetching campaigns", "", 0
     finally:
