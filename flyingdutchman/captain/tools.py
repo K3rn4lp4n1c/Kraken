@@ -194,11 +194,11 @@ async def _authenticate_campaign(campaign: Campaign, page_url: str, endpoint: tu
 async def authenticate_campaign(cid: str, page_url: str, endpoint: tuple[str, dict | None],
                                 expected_codes: tuple[int, ...]) -> dict:
     """
-    Authenticate a loaded, running campaign by sending a request from a page
-    inside the campaign context.
-
-    The tool reuses an existing page matching `page_url` or creates one when
-    no ne exists. The campaign must already be running.
+    Authenticate a loaded, running campaign by sending a request from a page its context.
+    The page will navigate to `page_url` and use `page.evaluate()` to send a request to `endpoint[0]`
+    The call to `page.evaluate()`, calls `fetch()` with the request initialization parameters.
+    This tool will not work as expected unless you know exactly how the request must look like.
+    If it fails, refer to `scout_campaign` to probe a campaign and determine how to authenticate it.
 
     The request body schema is:
     ```
@@ -213,9 +213,29 @@ async def authenticate_campaign(cid: str, page_url: str, endpoint: tuple[str, di
         }
     }
     ```
+    After interpolation, if the encoding was 'form', the request body becomes:
+    ```
+    {
+        "body": name=interpolated_name&password=interpolated_password&nonce=literal_value
+    }
+    ```
 
-    Fields marked with `$flyingdutchman` are interpolated from stored campaign
-    credentials. Endpoint URL must match the campaign origin used by `page_url`.
+    Fields marked with `$flyingdutchman` are interpolated from stored campaign credentials.
+    Ensure that `$flyingdutchman` is only present in `body.fields`.
+    Otherwise, the request body is sent as-is.
+
+    If a page with the same URL already exists in the campaign's context, it is reused and
+    the resulting HAR will not contain navigational requests to the URL. Or else, a new page is made.
+    An already existing page may not have the headers and cookies that might need to be set.
+    Conversely, a new page may not have the cookies that an existing page has.
+    Restart the campaign if you need a new page or add dummy query parameters to the URL.
+
+    The encoding is not inferred from the request header in `endpoint[1]` and defaults to 'json'.
+    It will also not be used to build the final request header. Those must be set explicitly.
+    The headers are scoped only to the fetch call made from the page and will not be set on the page.
+
+    If the process was succssful but the status code is not expected, the tool will report a failure.
+    Refer to `scout_campaign` for probing a campaign.
 
     Args:
         cid (str): ID of a campaign that has already been loaded.
@@ -225,7 +245,16 @@ async def authenticate_campaign(cid: str, page_url: str, endpoint: tuple[str, di
 
     Returns:
         dict: Contains `success` and `message`.
-        If `cid` is not loaded, returns `{"success": False, "status": "unknown", ...}`.
+    
+    Raises:
+        If the campaign is not loaded, try to load it first. Refer to `load_campaigns_from_db`.
+        If the campaign is not running, try to start it first. Refer to `control_campaign_lifecycle`.
+        If the campaign has no browser context, try to restart. Refer to `control_campaign_lifecycle`.
+        If any URLs provided do not match the campaign's, the process is aborted.
+        If at least two pages have the same URL, the process is aborted. This is unlikely.
+        If there are no credentials available for the campaign, check the Flying Dutchman for errors
+            or add credentials to the campaign.
+        If there is a failure in sending the HTTP request, the error message is likely explanatory.
     """
     campaign = campaigns.get_campaign(cid)
     if campaign is None:
