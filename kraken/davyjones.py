@@ -15,7 +15,7 @@ async def main():
     async with client:
         await client.ping()
 
-        result = await client.call_tool("captain_load_campaigns_from_db", {"campaign_ids": ["0"]})
+        result = await client.call_tool("captain_load_campaigns_from_db", {"campaign_ids": ["3"]})
         if result.structured_content is None:
             print("No structured content returned from the tool call.")
             return
@@ -23,7 +23,7 @@ async def main():
             print(f"Failed to load campaigns: {result.structured_content.get('message', 'Unknown error')}")
             return
 
-        result = await client.call_tool("captain_control_campaign_lifecycle", {"cid": "0", "action": "start"})
+        result = await client.call_tool("captain_control_campaign_lifecycle", {"cid": "3", "action": "start"})
         if result.structured_content is None:
             print("No structured content returned from the tool call.")
             return
@@ -31,17 +31,15 @@ async def main():
             print(f"Failed to start campaign: {result.structured_content.get('message', 'Unknown error')}")
             return
 
-        result = await client.call_tool("navigator_scout_campaign", {"id": "0", "force": True,
-                                        "url": "https://architectural-presumptuously-jeanine.ngrok-free.dev/ctf",
+        result = await client.call_tool("navigator_scout_campaign", {"cid": "3", "force": True,
+                                        "page_url": "https://ctf.hackthebox.com/event/details/ctf-try-out-1434",
                                         "headers": {
-                                            "ngrok-skip-browser-warning": "true"
                                         },
                                         "endpoints": [(
-                                            "https://architectural-presumptuously-jeanine.ngrok-free.dev/ctf/challenges",
+                                            "https://ctf.hackthebox.com/api/users/profile",
                                             {"method": "GET",
                                             "headers": {
                                                 "Content-Type": "application/json",
-                                                'ngrok-skip-browser-warning': 'true'
                                                 }
                                             }
                                         )]
@@ -51,4 +49,8 @@ async def main():
             if structured_content is None:
                 print("No structured content returned from the tool call.")
                 return
-            json.dump(result.structured_content, f, indent=4)
+            har_content = structured_content.get("har_content")
+            if har_content is None:
+                print("No HAR content returned from the tool call.")
+                return
+            json.dump(har_content, f, indent=4)
