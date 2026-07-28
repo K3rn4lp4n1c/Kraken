@@ -143,6 +143,69 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
                 logger.exception("Failed to recover campaign context after unexpected error")
         return False, f"Internal Server Error in fetching campaigns: {str(e)}", "", 0
 
+@navigator.tool()
+async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: dict | None = None,
+                        endpoints: list[tuple[str, dict]] | None = None,
+                        offset: int = 0, limit: int = 150_000) -> dict:
+    """
+    Capture a HAR snapshot for a loaded campaign at `url`.
+
+    If `force` is `False` and a HAR already exists for the URL hash, the existing HAR content
+    is returned instead of recording again. The capture time is also returned in the message.
+
+    HAR recording is done in "full" mode, which captures all headers, bodies, and cookies.
+    HAR contents are in "embed" state, which puts all bodies inline in the HAR file.
+    The file is saved in the campaign's HAR directory with a name based on the MD5 hash of the URL.
+
+    If a page with the same URL already exists in the campaign's context, it is reused and
+    the resulting HAR will not contain navigational requests to the URL. Or else, a new page is made.
+    An already existing page may not have the headers and cookies that might need to be set.
+    Conversely, a new page may not have the cookies that an existing page has.
+    Restart the campaign if you need a new page or add dummy query parameters to the URL.
+
+    Offsets and limits are often for clients with constraints on the max output size from servers.
+    While constraints may not apply to LLMs themselves, calls to servers are heavily abstracted.
+    In short, use them to avoid sending too much data to the server at once
+    Their values are capped at the length and size of the HAR content respectively.
+    They are applied regardless of whether the HAR content is newly recorded or already exists.
+    This will mean that sliced HAR content is likely not valid JSON.
+    Slicing may also split at multibyte characters.
+
+    Ordinarily, with this tool, browser contexts are paused and resumed to avoid losing state.
+    However, issues may arise when the `stop_har()` acknowledgment never arrives,
+    which has been observed against at least one campaign regardless of HAR file size,
+    where the underlying export appears to complete but the acknowledgment never arrives
+    In such cases, the context is forcibly closed to flush the HAR and the campaign is restarted.
+    If the campaign is restarted, the previous context is lost but the HAR file persists.
+    Consequently, session cookies and other storage states are lost
+
+    Args:
+        cid (str): ID of a campaign that has already been loaded.
+        page_url (str): Page URL to open/record.
+        force (bool = False): Re-record even when a HAR file already exists.
+        headers (dict | None = None): Extra HTTP headers set on a newly created page.
+        endpoints (list[tuple[str, dict]] | None = None): Fetch requests in (url (str), request_init (dict | None)) format.
+        offset (int = 0): Offset for the HAR content to return. Default is 0.
+        limit (int = 150000): Limit for the HAR content to return. Default is 150000.
+
+    Returns:
+        dict: Contains `success`, `message`, `har_content` and `har_size`.
+        `har_size` is the size of the original HAR content before applying offset and limit.
+    
+    Raises:
+        If the campaign is not found, try to load it first. Refer to `load_campaign_from_db`.
+        If the `page_url`'s scheme, root domain, or port does not match the campaign's, the process is aborted.
+        If at least two pages have the same URL, the process is aborted. This is unlikely.
+    """
+    campaign = campaigns.get_campaign(cid)
+    if campaign is None:
+        return {"success": False, "message": f"No campaign found with id: {cid}", "har_content": ""}
+    if headers is None: headers = {}
+    success, message, har_content, size_of_har = await _scout_campaign(
+        campaign, page_url, force, headers, endpoints, offset, limit
+    )
+    return {"success": success, "message": message, "har_content": har_content, "size_of_har": size_of_har}
+
 async def triage(campaign: Campaign, url: str, endt: tuple[str, dict]) -> tuple[str, list[str], list[bool]]:
     logger = logging.getLogger(__name__)
     checklist: list[str] = []
