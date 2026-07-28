@@ -276,3 +276,6 @@ class CampaignManager:
             raise ValueError(f"Campaign with id {campaign_id} does not exist. Add it first")
         await self._campaigns[campaign_id].stop()
         del self._campaigns[campaign_id]
+
+    async def clear(self) -> None:
+        for campaign_id in list(self._campaigns.keys()): await self.remove_campaign(campaign_id)

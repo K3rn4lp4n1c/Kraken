@@ -1,4 +1,4 @@
-from . import flyingdutchman, playwright
+from . import flyingdutchman, playwright, campaigns
 from dotenv import load_dotenv
 from flyingdutchman.captain import captain
 from flyingdutchman.navigator import navigator
@@ -35,5 +35,6 @@ async def main():
     except KeyboardInterrupt:
         logger.info("The Flying Dutchman is docking...")
     finally:
+        await campaigns.clear()
         await playwright.stop()
         logger.info("The Flying Dutchman has docked.")
