@@ -104,6 +104,8 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
             logger.warning("stop_har() ack never arrived; forcing close to flush")
             try:
                 await asyncio.wait_for(context.close(), timeout=30)
+                context = await playwright.create_context_with_callee_as_owner()
+                await campaign.resume(context)
             except Exception:
                 logger.warning("close() also failed/timed out; proceeding to restart anyway")
             await campaign.restart(playwright)
