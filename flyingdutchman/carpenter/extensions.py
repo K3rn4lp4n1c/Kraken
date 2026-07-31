@@ -15,19 +15,22 @@ class PlaywrightManager:
     def __init__(self) -> None:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
+        self._headed_browser: Browser | None = None
         self._lifecycle_lock = asyncio.Lock()
+        self._logger = logging.getLogger(__name__)
 
-    async def start(self) -> None:
+    async def start(self, **options) -> None:
         """Start Playwright and launch one shared browser."""
 
         async with self._lifecycle_lock:
             if self._browser is not None and self._browser.is_connected():
+                self._logger.warning("PlaywrightManager is already started.")
                 return
 
             playwright = await async_playwright().start()
 
             try:
-                browser = await playwright.chromium.launch(headless=True)
+                browser = await playwright.chromium.launch(headless=True, **options)
             except Exception:
                 await playwright.stop()
                 raise
@@ -35,28 +38,75 @@ class PlaywrightManager:
             self._playwright = playwright
             self._browser = browser
 
-    async def stop(self) -> None:
-        """Close the shared browser and stop Playwright."""
+    async def start_headed(self, **options) -> None:
+        """Start Playwright and launch one shared headed browser."""
 
         async with self._lifecycle_lock:
+            if self._headed_browser is not None and self._headed_browser.is_connected():
+                self._logger.warning("Headed Browser is already started.")
+                return
+
+            if self._playwright is None:
+                raise RuntimeError("PlaywrightManager has not been started. Call start() first.")
+            playwright = self._playwright
+
+            try:
+                headed_browser = await playwright.chromium.launch(headless=False, **options)
+            except Exception:
+                await playwright.stop()
+                raise
+
+            self._headed_browser = headed_browser
+
+    async def stop(self) -> None:
+        """Close all contexts, close the browser, and stop Playwright."""
+
+        async with self._lifecycle_lock:
+            if self._browser is None and self._playwright is None:
+                self._logger.warning("PlaywrightManager is already stopped.")
+                return
+
             browser = self._browser
             playwright = self._playwright
 
             self._browser = None
             self._playwright = None
 
-            if browser is not None:
-                for context in browser.contexts: await context.close()
+            try:
+                if browser is not None:
+                    for context in list(browser.contexts):
+                        try: await context.close()
+                        except Exception: self._logger.exception("Failed to close browser context.")
+                    await browser.close()
+            finally:
+                if playwright is not None: await playwright.stop()
 
-        try:
-            if browser is not None: await browser.close()
-        finally:
-            if playwright is not None: await playwright.stop()
+    async def stop_headed(self) -> None:
+        """Close all contexts, close the headed browser, and stop Playwright."""
 
-    async def create_context_with_caller_as_owner(self, **options) -> AsyncGenerator[BrowserContext]:
+        async with self._lifecycle_lock:
+            if self._headed_browser is None:
+                self._logger.warning("Headed Browser is already stopped.")
+                return
+
+            headed_browser = self._headed_browser
+            self._headed_browser = None
+
+            try:
+                if headed_browser is not None:
+                    for context in list(headed_browser.contexts):
+                        try: await context.close()
+                        except Exception: self._logger.exception("Failed to close browser context.")
+                    await headed_browser.close()
+            except Exception:
+                self._logger.exception("Failed to stop headed browser.")
+                raise
+
+    async def create_context_with_caller_as_owner(self, headless: bool = True,
+                                                **options) -> AsyncGenerator[BrowserContext]:
         """Create and automatically close an isolated browser context."""
 
-        browser = self._browser
+        browser = self._browser if headless else self._headed_browser
 
         if browser is None or not browser.is_connected():
             raise RuntimeError("PlaywrightManager has not been started")
@@ -68,8 +118,9 @@ class PlaywrightManager:
         finally:
             await context.close()
     
-    async def create_context_with_callee_as_owner(self, **options) -> BrowserContext:
-        browser = self._browser
+    async def create_context_with_callee_as_owner(self, headless = True,
+                                                **options) -> BrowserContext:
+        browser = self._browser if headless else self._headed_browser
 
         if browser is None or not browser.is_connected():
             raise RuntimeError("PlaywrightManager has not been started")
@@ -119,13 +170,13 @@ class Campaign:
             conn.commit()
             self.status = new_status
     
-    async def start(self, p: PlaywrightManager, **options) -> None:
+    async def start(self, p: PlaywrightManager, headless: bool = True, **options) -> None:
         async with self._lifecycle_lock:
             if self._browser_context is not None:
                 raise ValueError("Browser context already started. Perhaps restart the campaign")
             if self.status == "paused":
                 raise ValueError("Cannot start a paused campaign. Use resume instead")
-            self._browser_context = await p.create_context_with_callee_as_owner(**options)
+            self._browser_context = await p.create_context_with_callee_as_owner(headless, **options)
             if self._browser_context is None:
                 raise ValueError("Failed to create a browser context")
             self._update_status("running")
@@ -140,14 +191,14 @@ class Campaign:
             self._browser_context = None
             self._update_status("stopped")
     
-    async def restart(self, p: PlaywrightManager, **options) -> None:
+    async def restart(self, p: PlaywrightManager, headless: bool = True, **options) -> None:
         async with self._lifecycle_lock:
             if self.status == "paused":
                 raise ValueError("Cannot restart a paused campaign. Use resume first")
             if self._browser_context is not None:
                 await self._browser_context.close()
                 self._browser_context = None
-            self._browser_context = await p.create_context_with_callee_as_owner(**options)
+            self._browser_context = await p.create_context_with_callee_as_owner(headless, **options)
             if self._browser_context is None: raise ValueError("Failed to create a browser context")
             self._update_status("running")
     
