@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from flyingdutchman.carpenter import Campaign, send_request, does_url_match_campaign
 from flyingdutchman import playwright, campaigns, HAR_DIRPATH
 
+import re
 import asyncio
 import logging
 import hashlib
@@ -204,6 +205,144 @@ async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: 
     success, message, har_content, size_of_har = await _scout_campaign(
         campaign, page_url, force, headers, endpoints, offset, limit
     )
+    return {"success": success, "message": message, "har_content": har_content, "size_of_har": size_of_har}
+
+def _safe_har_dir(cid: str) -> Path:
+    """
+    Build the HAR directory path for a campaign, rejecting any cid that
+    could be used to escape HAR_DIRPATH (path separators, '..', etc) or
+    that isn't a plain ASCII digit string (matching real campaign ids).
+    """
+    _CID_RE = re.compile(r"^[0-9]+$")  # campaign ids are always plain ASCII digits
+    if not _CID_RE.fullmatch(str(cid)):
+        raise ValueError(f"Invalid campaign id: {cid!r}")
+    base = HAR_DIRPATH.resolve()
+    har_dir = (HAR_DIRPATH / str(cid)).resolve()
+    if not har_dir.is_relative_to(base):
+        raise ValueError(f"Invalid campaign id: {cid!r}")
+    return har_dir
+
+
+def _safe_har_file_path(cid: str, har_filename: str) -> Path:
+    """
+    Resolve a HAR filename within a campaign's HAR directory, rejecting
+    anything that isn't a bare '.har' filename (no separators, no '..',
+    no absolute paths) and verifying the resolved path is actually still
+    inside that directory.
+    """
+    _HAR_FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.har$")
+    if not _HAR_FILENAME_RE.fullmatch(har_filename):
+        raise ValueError(
+            f"Invalid HAR filename: {har_filename!r}. "
+            "Must be a bare filename ending in '.har' with no path separators."
+        )
+    har_dir = _safe_har_dir(cid)
+    har_file_path = (har_dir / har_filename).resolve()
+    if not har_file_path.is_relative_to(har_dir):
+        raise ValueError(f"Invalid HAR filename: {har_filename!r}")
+    return har_file_path
+
+
+async def _list_campaign_scouts(cid: str) -> tuple[bool, str, list[str]]:
+    """
+    List all HAR files for a given campaign.
+
+    Args:
+        cid (str): ID of the campaign.
+
+    Returns:
+        tuple[bool, str, list[str]]:
+        A tuple containing a success status, a message, and the list of
+        HAR file names for the campaign.
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        har_dir = _safe_har_dir(cid)
+        if not har_dir.exists() or not har_dir.is_dir():
+            raise FileNotFoundError(f"No HAR directory found for campaign {cid}")
+        har_files = [f.name for f in har_dir.iterdir() if f.is_file() and f.suffix == ".har"]
+        return True, f"Found {len(har_files)} HAR files for campaign {cid}.", har_files
+    except (FileNotFoundError, ValueError) as err:
+        return False, str(err), []
+    except Exception as e:
+        logger.exception("Error while listing HAR files for campaign")
+        return False, f"Error while listing HAR files for campaign {cid}: {str(e)}", []
+
+
+@navigator.tool()
+async def list_campaign_scouts(cid: str) -> dict:
+    """
+    List all HAR files for a given campaign, including any placed there
+    manually (outside of `scout_campaign`) with descriptive filenames.
+
+    Args:
+        cid (str): ID of the campaign.
+
+    Returns:
+        dict: Contains `success`, `message`, and `har_files`.
+        `har_files` is a list of HAR file names for the campaign.
+    """
+    success, message, har_files = await _list_campaign_scouts(cid)
+    return {"success": success, "message": message, "har_files": har_files}
+
+
+async def _read_har_file(cid: str, har_filename: str, offset: int = 0, limit: int = 150_000) -> tuple[bool, str, str, int]:
+    """
+    Read a HAR file for a given campaign.
+
+    Args:
+        cid (str): ID of the campaign.
+        har_filename (str): Name of the HAR file to read. Must be a bare
+            filename ending in '.har' — no path separators or '..' segments.
+        offset (int): Offset for the HAR content to return. Default is 0.
+        limit (int): Limit for the HAR content to return. Default is 150000.
+
+    Returns:
+        tuple[bool, str, str, int]:
+        A tuple containing a success status, a message, the HAR content
+        (if successful), and the size of the HAR content on disk.
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        har_file_path = _safe_har_file_path(cid, har_filename)
+        if not har_file_path.exists() or not har_file_path.is_file():
+            raise FileNotFoundError(f"No HAR file named '{har_filename}' found for campaign {cid}")
+        har_size = har_file_path.stat().st_size
+        har_content = _slice_har_content(har_file_path.read_text(encoding='utf-8'), offset, limit)
+        return True, f"Successfully read HAR file '{har_filename}' for campaign {cid}.", har_content, har_size
+    except (FileNotFoundError, ValueError) as err:
+        return False, str(err), "", 0
+    except Exception as e:
+        logger.exception("Error while reading HAR file for campaign")
+        return False, f"Error while reading HAR file '{har_filename}' for campaign {cid}: {str(e)}", "", 0
+
+@navigator.tool()
+async def read_campaign_scout(cid: str, har_filename: str, offset: int = 0, limit: int = 150_000) -> dict:
+    """
+    Read a HAR file for a given campaign — including HAR files placed
+    there manually (outside of `scout_campaign`), such as one recorded
+    from a real browser session and given a descriptive filename.
+
+    Offsets and limits behave the same as in `scout_campaign`: values are
+    capped at the length/size of the HAR content, applied regardless of
+    file size, and slicing means the returned content is likely not valid
+    JSON on its own — it may also split multibyte characters at the
+    boundary. Reassemble via repeated calls with adjusted `offset` before
+    parsing if you need the whole file.
+
+    Args:
+        cid (str): ID of the campaign.
+        har_filename (str): Name of the HAR file to read. Must be a bare
+            filename ending in '.har' — no path separators or '..' segments.
+        offset (int): Offset for the HAR content to return. Default is 0.
+        limit (int): Limit for the HAR content to return. Default is 150000.
+
+    Returns:
+        dict: Contains `success`, `message`, `har_content` and `size_of_har`.
+        `size_of_har` is the size of the original HAR content on disk,
+        before applying offset and limit.
+    """
+    success, message, har_content, size_of_har = await _read_har_file(cid, har_filename, offset, limit)
     return {"success": success, "message": message, "har_content": har_content, "size_of_har": size_of_har}
 
 async def triage(campaign: Campaign, url: str, endt: tuple[str, dict]) -> tuple[str, list[str], list[bool]]:

@@ -94,7 +94,8 @@ def load_campaigns_from_db(campaign_ids: list[str]) -> dict:
     success, message = _load_campaigns_from_db(campaign_ids)
     return {"success": success, "message": message}
 
-async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | None = None,**options) -> tuple[bool, str]:
+async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | None = None,
+                                    headless: bool = True, **options) -> tuple[bool, str]:
     """
     Controls the lifecycle of a campaign. The following actions are supported:
     - 'start': Starts the campaign. Options is passed up to its browser context creation
@@ -114,11 +115,11 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | N
     try:
         if action == 'start':
             if p is None: raise ValueError("PlaywrightManager instance must be provided for 'start'")
-            await campaign.start(p, **options)
+            await campaign.start(p, headless, **options)
         elif action == 'stop': await campaign.stop()
         elif action == 'restart':
             if p is None: raise ValueError("PlaywrightManager instance must be provided for 'restart'")
-            await campaign.restart(p, **options)
+            await campaign.restart(p, headless, **options)
         else: raise ValueError(f"Unsupported action: {action}")
         return True, f"{action} on Campaign '{campaign.id}' was successfully."
     except Exception as e:
@@ -126,7 +127,8 @@ async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | N
         return False, f"Internal Server Error in controlling campaign lifecycle: {str(e)}"
 
 @captain.tool()
-async def control_campaign_lifecycle(cid: str, action: str, options: dict | None = None) -> dict:
+async def control_campaign_lifecycle(cid: str, action: str, headless: bool = True,
+                                    options: dict | None = None) -> dict:
     """
     Control the lifecycle of a loaded campaign.
 
@@ -162,7 +164,8 @@ async def control_campaign_lifecycle(cid: str, action: str, options: dict | None
     campaign = campaigns.get_campaign(cid)
     if campaign is None:
         return {"success": False, "message": f"Campaign {cid} not found", "status": "unknown"}
-    success, message = await _control_campaign_lifecycle(campaign, action, playwright, **(options or {}))
+    success, message = await _control_campaign_lifecycle(campaign, action, playwright, headless,
+                                                        **(options or {}))
     return {"success": success, "message": message}
 
 async def _authenticate_campaign(campaign: Campaign, page_url: str, endpoint: tuple[str, dict | None],
