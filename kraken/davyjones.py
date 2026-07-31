@@ -1,10 +1,14 @@
 from . import MCP_SERVER
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
+from dotenv import load_dotenv
 
+import os
 import json
 
-transport = StdioTransport(command="python3", args=["-m", MCP_SERVER])
+load_dotenv()
+
+transport = StdioTransport(command="python3", args=["-m", MCP_SERVER], env=os.environ.copy())
 
 client = Client(transport=transport)
 
@@ -23,7 +27,8 @@ async def main():
             print(f"Failed to load campaigns: {result.structured_content.get('message', 'Unknown error')}")
             return
 
-        result = await client.call_tool("captain_control_campaign_lifecycle", {"cid": "3", "action": "start"})
+        result = await client.call_tool("captain_control_campaign_lifecycle",
+                                        {"cid": "3", "action": "start", "headless": False})
         if result.structured_content is None:
             print("No structured content returned from the tool call.")
             return
@@ -54,3 +59,18 @@ async def main():
                 print("No HAR content returned from the tool call.")
                 return
             json.dump(har_content, f, indent=4)
+
+        try:
+                    while True:
+                        pass
+        except KeyboardInterrupt:
+            print("Stopping the campaign...")
+            result = await client.call_tool("captain_control_campaign_lifecycle",
+                                            {"cid": "3", "action": "stop"})
+            if result.structured_content is None:
+                print("No structured content returned from the tool call.")
+                return
+            if not result.structured_content.get("success", False):
+                print(f"Failed to stop campaign: {result.structured_content.get('message', 'Unknown error')}")
+                return
+            print("Campaign stopped successfully.")
