@@ -21,6 +21,7 @@ async def main():
     _mount_subservers()
     try:
         await playwright.start()
+        await playwright.start_headed()
         transport = env("FLYING_DUTCHMAN_TRANSPORT")[0]
         logger.info("Who dares disturb the Flying Dutchman over %s?!", transport)
         if transport == "stdio":
@@ -36,5 +37,6 @@ async def main():
         logger.info("The Flying Dutchman is docking...")
     finally:
         await campaigns.clear()
+        await playwright.stop_headed()
         await playwright.stop()
         logger.info("The Flying Dutchman has docked.")
