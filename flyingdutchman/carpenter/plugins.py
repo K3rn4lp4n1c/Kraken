@@ -13,8 +13,21 @@ ASSETS_DIRPATH = PROJECT_ROOT.parent / "assets"
 HAR_DIRPATH = ASSETS_DIRPATH / "har"
 
 @dataclass
-class _HTB(Plugin):
+class _HTBAuth(Plugin):
+    name: str = "htb-auth"
+    description: str = """Hack The Box authentication plugin.
+    The plugin extracts the access token from a HAR file generated during the HTB SSO callback
+    and sets it in the browser's local storage for authenticated requests.
+    This is consistent with the HTB SSO flow,
+    where the access token is provided in the callback response after successful authentication.
+    The plugin also modifies the request headers to include the access token for subsequent requests.
+    The plugin will not navigate to a new page
+    or perform any additional actions beyond setting the token in local storage
+    and modifying request headers.
+    """
+    tags: tuple[str, ...] = ("htb", "authentication", "sso", "token", "plugin")
     _sso_callback_url: str = "https://ctf.hackthebox.com/api/sso/callback"
+    _origin_url: str = "https://ctf.hackthebox.com"
     _logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
 
     def _extract_token_from_har(self, har_path: Path) -> str:
@@ -34,12 +47,12 @@ class _HTB(Plugin):
 
         raise ValueError("No successful HTB SSO callback token found")
 
-    def _make_storage_state(self, token: str) -> StorageState:
+    def _make_storage_state(self, token: str, origin_url: str) -> StorageState:
         return {
             "cookies": [],
             "origins": [
                 {
-                    "origin": "https://ctf.hackthebox.com",
+                    "origin": origin_url,
                     "localStorage": [
                         {
                             "name": "ctf-token",
@@ -61,10 +74,10 @@ class _HTB(Plugin):
        kwargs["endpoint"] = formatted_endpoint
        browser = campaign._browser_context
        if browser is None: raise RuntimeError("Browser context is not initialized")
-       storage_state = self._make_storage_state(token)
+       storage_state = self._make_storage_state(token, self._origin_url)
        await browser.set_storage_state(storage_state)
        return kwargs
 
 PLUGINS: dict[str, Plugin] = {
-    "htb": _HTB("htb"),
+    "htb-auth": _HTBAuth(),
 }
