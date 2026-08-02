@@ -72,10 +72,11 @@ class _HTBAuth(Plugin):
        reqInit["headers"]["Authorization"] = f"Bearer {token}"
        formatted_endpoint = (endpoint[0], reqInit) if endpoint else ()
        kwargs["endpoint"] = formatted_endpoint
-       browser = campaign._browser_context
+       browser = await campaign.pause()
        if browser is None: raise RuntimeError("Browser context is not initialized")
        storage_state = self._make_storage_state(token)
        await browser.set_storage_state(storage_state)
+       await campaign.resume(browser)
        return kwargs
 
 PLUGINS: dict[str, Plugin] = {

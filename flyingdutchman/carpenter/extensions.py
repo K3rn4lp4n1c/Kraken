@@ -319,12 +319,14 @@ class Campaign(BaseCampaign):
             if not callable(getattr(self, "_authenticate", None)):
                 func: Callable[[Campaign], Awaitable[dict]] = getattr(plugin, "authenticate")
                 if func is not None: self._authenticate = func
+        if not callable(getattr(self, "_authenticate", None)): self._authenticate = None
 
     async def authenticate(self, page_url: str, endpoint: tuple[str, dict | None],
                            expected_codes: tuple[int, ...]) -> None:
         kwargs = {"page_url": page_url, "endpoint": endpoint, "expected_codes": expected_codes}
         try:
-            kwargs = await self._authenticate(self, **kwargs)
+            if callable(getattr(self, "_authenticate", None)) and self._authenticate is not None:
+                kwargs = await self._authenticate(self, **kwargs)
             await super().authenticate(**kwargs)
         except Exception as e:
             self._logger.exception("Authentication failed for campaign %s", self.name)
