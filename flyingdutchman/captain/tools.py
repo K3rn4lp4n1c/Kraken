@@ -48,16 +48,52 @@ def get_campaigns() -> dict:
     success, message, campaigns = _get_campaigns()
     return {"success": success, "message": message, "campaigns": campaigns }
 
-def _load_campaigns_from_db(campaign_ids: list[str], plugin_name: str = "") -> tuple[bool, str]:
+def _get_plugins(offset: int = 0, limit: int = 10) -> list[dict]:
     """
-    Loads campaigns into the CampaignManager based on their IDs.
+    Fetch all available plugins.
+
+    Returns:
+        list[dict]: A list of dictionaries, each representing a plugin with its details.
+    """
+    plugins = sorted(PLUGINS.values(), key=lambda p: p.name)
+    plugins = plugins[offset:offset + limit]
+    return [
+        {"name": plugin.name, "description": plugin.description, "tags": plugin.tags}
+        for plugin in plugins
+    ]
+
+@captain.tool()
+def get_plugins(offset: int = 0, limit: int = 10) -> dict:
+    """
+    Fetch all available plugins with pagination support in alphabetical order by name.
+
+    Args:
+        offset (int = 0): The starting index for pagination.
+        limit (int = 10): The maximum number of plugins to return.
+    Returns:
+        dict: Contains `success`, `message`, and `plugins`.
+        Each plugin item includes `name`, `description`, and `tags`.
+    """
+    plugins = _get_plugins(offset, limit)
+    return {"success": True, "message": "Plugins fetched successfully.", "plugins": plugins}
+
+def _load_campaigns_from_db(campaign_ids: list[str], plugin_names: list[str] | None = None
+                        ) -> tuple[bool, str]:
+    """
+    Loads campaigns into the CampaignManager based on their IDs with optional plugin association.
+    This is required before actions on campaigns can be performed.
 
     Args:
         campaign_ids (list[str]): List of campaign IDs to load.
     """
     logger = logging.getLogger(__name__)
-    plugin = PLUGINS.get(plugin_name)
+    plugins: list = []
     try:
+        for plugin_name in plugin_names or []:
+            plugin = PLUGINS.get(plugin_name)
+            if plugin is None: raise ValueError(f"Plugin '{plugin_name}' not found in PLUGINS")
+            plugins.append(plugin)
+
         with sqlite3_connect(DB_PATH) as conn:
             cursor = conn.cursor()
             table_name = env("CAMPAIGNS_TABLE")[0]
@@ -70,7 +106,7 @@ def _load_campaigns_from_db(campaign_ids: list[str], plugin_name: str = "") -> t
                 campaign_data = dict(zip(fields, row))
                 campaign = Campaign(**campaign_data, paths={
                     "db": DB_PATH, "har": HAR_DIRPATH, "playwright_auth": PLAYWRIGHT_AUTH_DIRPATH,
-                }, plugin=plugin)
+                }, plugins=plugins)
                 campaigns.add_campaign(campaign)
         return True, f"Campaigns {', '.join(campaign_ids)} loaded successfully."
     except Exception as e:
@@ -78,21 +114,32 @@ def _load_campaigns_from_db(campaign_ids: list[str], plugin_name: str = "") -> t
         return False, f"Error loading campaigns from database: {str(e)}"
 
 @captain.tool()
-def load_campaigns_from_db(campaign_ids: list[str], plugin_name: str = "") -> dict:
+def load_campaigns_from_db(campaign_ids: list[str], plugin_names: list[str] | None = None) -> dict:
     """
     Load campaigns from the database into the in-memory campaign registry.
     This is required before actions on campaigns can be performed.
     There are no available tools to remove campaigns from the campaign registry.
     Loading a campaign ID that's already loaded fails without replacement or reloading.
-    Therefore, the only way to reload a campaign is to restart the Flying Dutchman.
+    Therefore, the only way to reload a campaign is to restart the Flying Dutchman server.
+
+    Plugin names are optional. They are used to extend the functionality of the loaded campaigns
+    without modifying the core Flying Dutchman codebase.
+    If provided, the plugins will be associated with the loaded campaigns.
+    To see the available plugins, use the `get_plugins` tool.
 
     Args:
         campaign_ids (list[str]): Campaign IDs to load. IDs are strings here not integers.
+        plugin_name (str): Optional plugin name to associate with the loaded campaigns.
 
     Returns:
         dict: Contains `success` and `message`.
+    
+    Raises:
+        If a campaign ID is not found in the database, the error message will indicate that.
+        If a plugin name is not found in the available plugins, the error message will indicate that.
+        If a campaign ID is already loaded, the error message will indicate that.
     """
-    success, message = _load_campaigns_from_db(campaign_ids, plugin_name)
+    success, message = _load_campaigns_from_db(campaign_ids, plugin_names)
     return {"success": success, "message": message}
 
 async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | None = None,
@@ -137,6 +184,7 @@ async def control_campaign_lifecycle(cid: str, action: str, headless: bool = Tru
     - `start`: create a browser context and mark campaign as running.
     - `stop`: close the active context and mark it stopped.
     - `restart`: replace the active context with a new one and mark it running.
+    The `headless` parameter controls whether the browser context is headless or not.
     `options` are forwarded to browser-context creation for `start` and `restart`.
 
     Unsupported actions:
@@ -151,6 +199,7 @@ async def control_campaign_lifecycle(cid: str, action: str, headless: bool = Tru
     Args:
         cid (str): ID of a campaign that has already been loaded.
         action (str): One of `start`, `stop`, or `restart`.
+        headless (bool = True): Whether the browser and its context should be headless or not.
         options (dict | None = None): Optional browser-context options.
 
     Returns:
@@ -160,7 +209,8 @@ async def control_campaign_lifecycle(cid: str, action: str, headless: bool = Tru
         If the campaign is not loaded, try to load it first. Refer to `load_campaigns_from_db`.
         If the `PlaywrightManager` instance is not up, check The Flying Dutchman for server errors.
         If the `action` is unsupported, the error message will indicate that.
-        If no valid action can change the status, try again or check the Flying Dutchman for errors.
+        If no valid action can change the status, try again or request for a server restart.
+        If the is no headed browser is unavailable, try again or request for a server restart.
     """
     campaign = campaigns.get_campaign(cid)
     if campaign is None:
@@ -176,8 +226,10 @@ async def _authenticate_campaign(campaign: Campaign, page_url: str, endpoint: tu
 
     Args:
         campaign (Campaign): The campaign to authenticate.
-        url (str): The URL to send the authentication request to.
-        reqInit (dict): Optional dictionary containing request initialization parameters.
+        page_url (str): The URL of the page to navigate to for authentication.
+        endpoint (tuple[str, dict | None]): A tuple containing the URL
+            and request initialization parameters for the request to be sent from the page's context.
+        expected_codes (tuple[int, ...]): A tuple of HTTP status codes that are considered successful.
 
     Returns:
         tuple[bool, str]:
@@ -240,6 +292,9 @@ async def authenticate_campaign(cid: str, page_url: str, endpoint: tuple[str, di
 
     If the process was succssful but the status code is not expected, the tool will report a failure.
     Refer to `scout_campaign` for probing a campaign.
+
+    It might also help to load the campaign with a plugin
+    especially for campaigns whose authentication flow is not consistent with The Flying Dutchman.
 
     Args:
         cid (str): ID of a campaign that has already been loaded.
