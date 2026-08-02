@@ -2,7 +2,7 @@ from . import captain
 from flyingdutchman import (
     playwright, campaigns, DB_PATH, HAR_DIRPATH, PLAYWRIGHT_AUTH_DIRPATH, PlaywrightManager as PM
 )
-from flyingdutchman.carpenter import Campaign, env, sqlite3_connect
+from flyingdutchman.carpenter import Campaign, PLUGINS, env, sqlite3_connect
 
 import logging
 
@@ -48,7 +48,7 @@ def get_campaigns() -> dict:
     success, message, campaigns = _get_campaigns()
     return {"success": success, "message": message, "campaigns": campaigns }
 
-def _load_campaigns_from_db(campaign_ids: list[str]) -> tuple[bool, str]:
+def _load_campaigns_from_db(campaign_ids: list[str], plugin_name: str = "") -> tuple[bool, str]:
     """
     Loads campaigns into the CampaignManager based on their IDs.
 
@@ -56,6 +56,7 @@ def _load_campaigns_from_db(campaign_ids: list[str]) -> tuple[bool, str]:
         campaign_ids (list[str]): List of campaign IDs to load.
     """
     logger = logging.getLogger(__name__)
+    plugin = PLUGINS.get(plugin_name)
     try:
         with sqlite3_connect(DB_PATH) as conn:
             cursor = conn.cursor()
@@ -68,8 +69,8 @@ def _load_campaigns_from_db(campaign_ids: list[str]) -> tuple[bool, str]:
             for row in rows:
                 campaign_data = dict(zip(fields, row))
                 campaign = Campaign(**campaign_data, paths={
-                    "db": DB_PATH, "har": HAR_DIRPATH, "playwright_auth": PLAYWRIGHT_AUTH_DIRPATH
-                })
+                    "db": DB_PATH, "har": HAR_DIRPATH, "playwright_auth": PLAYWRIGHT_AUTH_DIRPATH,
+                }, plugin=plugin)
                 campaigns.add_campaign(campaign)
         return True, f"Campaigns {', '.join(campaign_ids)} loaded successfully."
     except Exception as e:
@@ -77,7 +78,7 @@ def _load_campaigns_from_db(campaign_ids: list[str]) -> tuple[bool, str]:
         return False, f"Error loading campaigns from database: {str(e)}"
 
 @captain.tool()
-def load_campaigns_from_db(campaign_ids: list[str]) -> dict:
+def load_campaigns_from_db(campaign_ids: list[str], plugin_name: str = "") -> dict:
     """
     Load campaigns from the database into the in-memory campaign registry.
     This is required before actions on campaigns can be performed.
@@ -91,7 +92,7 @@ def load_campaigns_from_db(campaign_ids: list[str]) -> dict:
     Returns:
         dict: Contains `success` and `message`.
     """
-    success, message = _load_campaigns_from_db(campaign_ids)
+    success, message = _load_campaigns_from_db(campaign_ids, plugin_name)
     return {"success": success, "message": message}
 
 async def _control_campaign_lifecycle(campaign: Campaign, action: str, p: PM | None = None,
