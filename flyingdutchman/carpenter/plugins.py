@@ -47,12 +47,12 @@ class _HTBAuth(Plugin):
 
         raise ValueError("No successful HTB SSO callback token found")
 
-    def _make_storage_state(self, token: str, origin_url: str) -> StorageState:
+    def _make_storage_state(self, token: str) -> StorageState:
         return {
             "cookies": [],
             "origins": [
                 {
-                    "origin": origin_url,
+                    "origin": self._origin_url,
                     "localStorage": [
                         {
                             "name": "ctf-token",
@@ -74,7 +74,7 @@ class _HTBAuth(Plugin):
        kwargs["endpoint"] = formatted_endpoint
        browser = campaign._browser_context
        if browser is None: raise RuntimeError("Browser context is not initialized")
-       storage_state = self._make_storage_state(token, self._origin_url)
+       storage_state = self._make_storage_state(token)
        await browser.set_storage_state(storage_state)
        return kwargs
 
