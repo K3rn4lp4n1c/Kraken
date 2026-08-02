@@ -4,7 +4,6 @@ from fastmcp.client.transports import StdioTransport
 from dotenv import load_dotenv
 
 import os
-import json
 
 load_dotenv()
 
@@ -19,7 +18,9 @@ async def main():
     async with client:
         await client.ping()
 
-        result = await client.call_tool("captain_load_campaigns_from_db", {"campaign_ids": ["3"]})
+        result = await client.call_tool("captain_load_campaigns_from_db", {
+            "campaign_ids": ["3"], "plugin_name": "htb"
+        })
         if result.structured_content is None:
             print("No structured content returned from the tool call.")
             return
@@ -36,41 +37,30 @@ async def main():
             print(f"Failed to start campaign: {result.structured_content.get('message', 'Unknown error')}")
             return
 
-        result = await client.call_tool("navigator_scout_campaign", {"cid": "3", "force": True,
-                                        "page_url": "https://ctf.hackthebox.com/event/details/ctf-try-out-1434",
-                                        "headers": {
-                                        },
-                                        "endpoints": [(
-                                            "https://ctf.hackthebox.com/api/users/profile",
-                                            {"method": "GET",
-                                            "headers": {
-                                                "Content-Type": "application/json",
-                                                }
-                                            }
-                                        )]
-                                    })
-        with open("scout_campaign.har", "w") as f:
-            structured_content = result.structured_content
-            if structured_content is None:
-                print("No structured content returned from the tool call.")
-                return
-            har_content = structured_content.get("har_content")
-            if har_content is None:
-                print("No HAR content returned from the tool call.")
-                return
-            json.dump(har_content, f, indent=4)
+        result = await client.call_tool("captain_authenticate_campaign", {
+            "cid": "3",
+            "page_url": "https://ctf.hackthebox.com/",
+            "endpoint": ("https://ctf.hackthebox.com/api/users/profile", {
+                "method": "GET",
+                "headers": { "Accept": "application/json" },
+                "mode": "cors",
+                "credentials": "include",
+                "body": None
+            }),
+            "expected_codes": [200]
+        })
 
         try:
-                    while True:
-                        pass
+            while True:
+                pass
         except KeyboardInterrupt:
             print("Stopping the campaign...")
-            result = await client.call_tool("captain_control_campaign_lifecycle",
-                                            {"cid": "3", "action": "stop"})
-            if result.structured_content is None:
-                print("No structured content returned from the tool call.")
-                return
-            if not result.structured_content.get("success", False):
-                print(f"Failed to stop campaign: {result.structured_content.get('message', 'Unknown error')}")
-                return
-            print("Campaign stopped successfully.")
+        result = await client.call_tool("captain_control_campaign_lifecycle",
+                                        {"cid": "3", "action": "stop", "headless": False})
+        if result.structured_content is None:
+            print("No structured content returned from the tool call.")
+            return
+        if not result.structured_content.get("success", False):
+            print(f"Failed to stop campaign: {result.structured_content.get('message', 'Unknown error')}")
+            return
+        print("Campaign stopped successfully.")
