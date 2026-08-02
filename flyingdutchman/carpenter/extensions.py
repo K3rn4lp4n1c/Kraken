@@ -3,7 +3,7 @@ from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlencode
 from dataclasses import dataclass, field
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable, Awaitable
 from playwright.async_api import Playwright, Browser, BrowserContext, Page, async_playwright
 from .tools import send_request, sqlite3_connect, env, does_url_match_campaign
 
@@ -118,8 +118,7 @@ class PlaywrightManager:
         finally:
             await context.close()
     
-    async def create_context_with_callee_as_owner(self, headless = True,
-                                                **options) -> BrowserContext:
+    async def create_context_with_callee_as_owner(self, headless = True, **options) -> BrowserContext:
         browser = self._browser if headless else self._headed_browser
 
         if browser is None or not browser.is_connected():
@@ -311,17 +310,25 @@ class BaseCampaign:
 
 @dataclass
 class Campaign(BaseCampaign):
-    plugin: Plugin | None = None
+    plugins: list[Plugin] | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        plugins = self.plugins or []
+        for plugin in plugins:
+            if not callable(getattr(self, "_authenticate", None)):
+                func: Callable[[Campaign], Awaitable[dict]] = getattr(plugin, "authenticate")
+                if func is not None: self._authenticate = func
 
     async def authenticate(self, page_url: str, endpoint: tuple[str, dict | None],
                            expected_codes: tuple[int, ...]) -> None:
-        kwargs = {
-            "page_url": page_url,
-            "endpoint": endpoint,
-            "expected_codes": expected_codes
-        }
-        if self.plugin is not None: kwargs = await self.plugin.authenticate(self, **kwargs)
-        await super().authenticate(**kwargs)
+        kwargs = {"page_url": page_url, "endpoint": endpoint, "expected_codes": expected_codes}
+        try:
+            kwargs = await self._authenticate(self, **kwargs)
+            await super().authenticate(**kwargs)
+        except Exception as e:
+            self._logger.exception("Authentication failed for campaign %s", self.name)
+            raise Exception("Authentication failed for campaign") from e 
 
 @dataclass
 class CampaignManager:
@@ -348,6 +355,8 @@ class CampaignManager:
 @dataclass
 class Plugin():
     name: str = ""
+    description: str = ""
+    tags: tuple[str, ...] = field(default_factory=tuple)
     async def authenticate(self, campaign: Campaign, **kwargs) -> dict:
         campaign_name = campaign.name
         raise NotImplementedError(f"No authentication for {self.name} on {campaign_name}: {kwargs}")
