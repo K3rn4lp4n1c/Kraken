@@ -136,7 +136,7 @@ class Challenge:
     body: dict | None = None
 
 @dataclass
-class Campaign:
+class BaseCampaign:
     id: str
     name: str
     url: str
@@ -250,7 +250,7 @@ class Campaign:
         if encoding == "text":
             return '\n'.join(f"{k}={v}" for k, v in normalized_body.items())
         elif encoding == "json":
-            return json.dumps(normalized_body)
+            return json.dumps(normalized_body) if normalized_body else ""
         else:
             raise ValueError(f"Unsupported encoding type: {encoding}. Supported types are 'json' and 'form'.")
 
@@ -277,9 +277,9 @@ class Campaign:
                 if row is None: raise ValueError(f"No credentials found for campaign id: {self.id}")
                 credentials: dict = json.loads(row[0])
                 reqInit = endpoint[1].copy() if endpoint[1] is not None else {}
-                body: dict | str = dict(reqInit.get('body', {})).copy()
+                body: dict | str = dict(reqInit.get('body', {}) or {}).copy()
                 body = self._normalize_request_body(body, {"credentials": credentials})
-                reqInit['body'] = body
+                reqInit['body'] = body if len(body) > 0 else None
                 new_endpoint = (endpoint[0], reqInit)
                 if self._browser_context is None or self._browser_context.is_closed():
                     raise ValueError("No browser context provided. Perhaps restart the campaign")
@@ -310,6 +310,20 @@ class Campaign:
             self._authenticated = True
 
 @dataclass
+class Campaign(BaseCampaign):
+    plugin: Plugin | None = None
+
+    async def authenticate(self, page_url: str, endpoint: tuple[str, dict | None],
+                           expected_codes: tuple[int, ...]) -> None:
+        kwargs = {
+            "page_url": page_url,
+            "endpoint": endpoint,
+            "expected_codes": expected_codes
+        }
+        if self.plugin is not None: kwargs = await self.plugin.authenticate(self, **kwargs)
+        await super().authenticate(**kwargs)
+
+@dataclass
 class CampaignManager:
     _campaigns: dict[str, Campaign] = field(default_factory=dict, init=False)
     _logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__), init=False)
@@ -330,3 +344,10 @@ class CampaignManager:
 
     async def clear(self) -> None:
         for campaign_id in list(self._campaigns.keys()): await self.remove_campaign(campaign_id)
+
+@dataclass
+class Plugin():
+    name: str = ""
+    async def authenticate(self, campaign: Campaign, **kwargs) -> dict:
+        campaign_name = campaign.name
+        raise NotImplementedError(f"No authentication for {self.name} on {campaign_name}: {kwargs}")
