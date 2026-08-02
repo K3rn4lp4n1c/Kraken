@@ -19,7 +19,7 @@ async def main():
         await client.ping()
 
         result = await client.call_tool("captain_load_campaigns_from_db", {
-            "campaign_ids": ["3"], "plugin_name": "htb"
+            "campaign_ids": ["3"], "plugin_names": ["htb-auth"]
         })
         if result.structured_content is None:
             print("No structured content returned from the tool call.")
