@@ -293,6 +293,7 @@ class BaseCampaign:
                 if page is None:
                     page = await self._browser_context.new_page()
                     resp = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
+                await asyncio.sleep(5_000)
                 resp = await send_request(page, page_url, new_endpoint)
                             
                 resp_ok = resp.get("ok")
