@@ -5,7 +5,7 @@ from urllib.parse import urlencode, urlparse
 from dataclasses import dataclass, field
 from collections.abc import AsyncGenerator, Callable, Awaitable
 from playwright.async_api import Playwright, Browser, BrowserContext, Page, Response, async_playwright
-from .tools import send_request, sqlite3_connect, env, does_url_match_campaign
+from .utils import send_request, sqlite3_connect, env, does_url_match_campaign
 
 import json
 import hashlib
@@ -241,7 +241,6 @@ class BaseCampaign:
             if resp == 429:
                 self._logger.warning(f"Possible Rate Limiting detected. Received HTTP 429 from {func_name}.")
                 raise ValueError(f"Possible Rate Limiting detected. Received HTTP 429 from {func_name}.")
-        await asyncio.sleep(300)
 
     def _normalize_request_body(self, body: dict, interpolated_values: dict) -> str:
         """
@@ -338,8 +337,8 @@ class BaseCampaign:
             self._authenticated = True
     
     async def scout(self, page_url: str, force: bool, playwright: PlaywrightManager,
-                        headers: dict | None = None, endpoints: list[tuple[str, dict]] | None = None,
-                        ) -> tuple[bool, str, str, int]:
+                    headers: dict | None = None, endpoints: list[tuple[str, dict]] | None = None,
+                    ) -> tuple[bool, str, str, int]:
         """
         Records a HAR file for a given campaign by visiting the provided URL.
         If the HAR file already exists and force is set to True, it will overwrite the existing file.
