@@ -4,12 +4,15 @@ from fastmcp.client.transports import StdioTransport
 from dotenv import load_dotenv
 
 import os
+import asyncio
 
 load_dotenv()
 
 transport = StdioTransport(command="python3", args=["-m", MCP_SERVER], env=os.environ.copy())
 
 client = Client(transport=transport)
+
+headless = False
 
 async def main():
     if client is None:
@@ -29,7 +32,7 @@ async def main():
             return
 
         result = await client.call_tool("captain_control_campaign_lifecycle",
-                                        {"cid": "3", "action": "start", "headless": False})
+                                        {"cid": "3", "action": "start", "headless": headless})
         if result.structured_content is None:
             print("No structured content returned from the tool call.")
             return
@@ -50,13 +53,41 @@ async def main():
             "expected_codes": [200]
         })
 
-        try:
-            while True:
-                pass
-        except KeyboardInterrupt:
-            print("Stopping the campaign...")
+        await asyncio.sleep(5)  # Wait for a moment to ensure the authentication process completes
+
+        account_id = os.environ.get("HTB_ACCOUNT_ID")
+        if not account_id:
+            print("HTB_ACCOUNT_ID environment variable is not set.")
+            return
+        result = await client.call_tool("navigator_scout_campaign", {
+            "cid": "3",
+            "page_url": "https://profile.hackthebox.com/",
+            "force": True,
+            "endpoints": [
+                (f"https://profile.hackthebox.com/api/experience/v1/account/{account_id}", {
+                    "method": "GET",
+                    "headers": { "Accept": "application/json" },
+                    "mode": "cors",
+                    "credentials": "include",
+                    "body": None
+                }),
+            ]
+        })
+        if result.structured_content is None:
+            print("No structured content returned from the tool call.")
+            return
+        if not result.structured_content.get("success", False):
+            print(f"Failed to scout campaign: {result.structured_content.get('message', 'Unknown error')}")
+            return
+
+        if not headless:
+            try:
+                while True:
+                    pass
+            except KeyboardInterrupt:
+                print("Stopping the campaign...")
         result = await client.call_tool("captain_control_campaign_lifecycle",
-                                        {"cid": "3", "action": "stop", "headless": False})
+                                        {"cid": "3", "action": "stop", "headless": headless})
         if result.structured_content is None:
             print("No structured content returned from the tool call.")
             return
