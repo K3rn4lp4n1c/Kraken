@@ -25,7 +25,7 @@ def _get_campaigns() -> tuple[bool, str, list[dict]]:
             rows = cursor.fetchall()
             db_campaigns = [dict(zip(fields, row)) for row in rows]
             db_campaigns = [
-                {**c, "loaded": campaigns.get_campaign(c['id']) is not None}
+                {**c, "loaded": campaigns.get_campaign(c["id"]) is not None}
                 for c in db_campaigns
             ]
             return True, "Campaigns fetched successfully.", db_campaigns
