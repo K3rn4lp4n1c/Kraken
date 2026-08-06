@@ -24,6 +24,11 @@ class _HTBAuth(Plugin):
     The plugin will not navigate to a new page
     or perform any additional actions beyond setting the token in local storage
     and modifying request headers.
+    The plugin is intended to be used in headed mode only because HTB flags headless browsers
+    and the SSO flow may not work correctly in headless mode.
+    The plugin will not set storage state for URLs outside its origin
+    which defaults to https://ctf.hackthebox.com
+    because local storage is scoped to the origin of the page.
     """
     tags: tuple[str, ...] = ("htb", "authentication", "sso", "token", "plugin")
     _sso_callback_url: str = "https://ctf.hackthebox.com/api/sso/callback"
