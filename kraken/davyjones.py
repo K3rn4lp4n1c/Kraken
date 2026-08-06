@@ -55,16 +55,12 @@ async def main():
 
         await asyncio.sleep(5)  # Wait for a moment to ensure the authentication process completes
 
-        account_id = os.environ.get("HTB_ACCOUNT_ID")
-        if not account_id:
-            print("HTB_ACCOUNT_ID environment variable is not set.")
-            return
         result = await client.call_tool("navigator_scout_campaign", {
             "cid": "3",
-            "page_url": "https://profile.hackthebox.com/",
+            "page_url": "https://ctf.hackthebox.com/event/details/ctf-try-out-1434",
             "force": True,
             "endpoints": [
-                (f"https://profile.hackthebox.com/api/experience/v1/account/{account_id}", {
+                (f"https://ctf.hackthebox.com/api/public/company-registration-status", {
                     "method": "GET",
                     "headers": { "Accept": "application/json" },
                     "mode": "cors",
