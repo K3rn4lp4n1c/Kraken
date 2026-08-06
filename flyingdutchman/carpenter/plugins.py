@@ -64,6 +64,7 @@ class _HTBAuth(Plugin):
         }
     
     async def authenticate(self, campaign: Campaign, **kwargs) -> dict:
+       if campaign.headless: raise RuntimeError(f"{self.name} plugin must be used in headed mode")
        har_path = HAR_DIRPATH / str(campaign.id) / "authentication.har"
        token = self._extract_token_from_har(har_path)
        endpoint = tuple(kwargs.get("endpoint", ()))
@@ -72,12 +73,25 @@ class _HTBAuth(Plugin):
        reqInit["headers"]["Authorization"] = f"Bearer {token}"
        formatted_endpoint = (endpoint[0], reqInit) if endpoint else ()
        kwargs["endpoint"] = formatted_endpoint
-       browser = await campaign.pause()
-       if browser is None: raise RuntimeError("Browser context is not initialized")
+       context = await campaign.pause()
+       if context is None: raise RuntimeError("Browser context is not initialized")
        storage_state = self._make_storage_state(token)
-       await browser.set_storage_state(storage_state)
-       await campaign.resume(browser)
+       await context.set_storage_state(storage_state)
+       await campaign.resume(context)
        return kwargs
+
+    async def scout(self, campaign: Campaign, **kwargs) -> dict:
+        if campaign.headless: raise RuntimeError(f"{self.name} plugin must be used in headed mode")
+        har_path = HAR_DIRPATH / str(campaign.id) / "authentication.har"
+        token = self._extract_token_from_har(har_path)
+        endpoints: list[tuple[str, dict]] = kwargs.get("endpoints", [])
+        for i, endpoint in enumerate(endpoints):
+            reqInit = endpoint[1].copy() if isinstance(endpoint[1], dict) else {}
+            reqInit["headers"] = reqInit.get("headers", {})
+            reqInit["headers"]["Authorization"] = f"Bearer {token}"
+            endpoints[i] = (endpoint[0], reqInit)
+        kwargs["endpoints"] = endpoints
+        return kwargs
 
 PLUGINS: dict[str, Plugin] = {
     "htb-auth": _HTBAuth(),
