@@ -89,7 +89,7 @@ class _HTBAuth(Plugin):
         if campaign.headless: raise RuntimeError(f"{self.name} plugin must be used in headed mode")
         har_path = HAR_DIRPATH / str(campaign.id) / "authentication.har"
         token = self._extract_token_from_har(har_path)
-        endpoints: list[tuple[str, dict]] = kwargs.get("endpoints", [])
+        endpoints: list[tuple[str, dict]] = kwargs.get("endpoints") or []
         for i, endpoint in enumerate(endpoints):
             reqInit = endpoint[1].copy() if isinstance(endpoint[1], dict) else {}
             reqInit["headers"] = reqInit.get("headers", {})
