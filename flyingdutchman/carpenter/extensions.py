@@ -1,14 +1,15 @@
 from __future__ import annotations
 from pathlib import Path
 from datetime import datetime
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from dataclasses import dataclass, field
 from collections.abc import AsyncGenerator, Callable, Awaitable
-from playwright.async_api import Playwright, Browser, BrowserContext, Page, async_playwright
+from playwright.async_api import Playwright, Browser, BrowserContext, Page, Response, async_playwright
 from .tools import send_request, sqlite3_connect, env, does_url_match_campaign
 
-import asyncio
 import json
+import hashlib
+import asyncio
 import logging
 
 class PlaywrightManager:
@@ -143,6 +144,7 @@ class BaseCampaign:
     datetime: datetime
     paths: dict[str, Path] = field(default_factory=dict)
     challenges: list[Challenge] = field(default_factory=list)
+    headless: bool = True
     _logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__), init=False)
     _authenticated: bool = field(default=False, init=False)
     _browser_context: BrowserContext | None = field(default=None, init=False)
@@ -150,6 +152,7 @@ class BaseCampaign:
 
     def __post_init__(self):
         self._auth_path = self.paths['playwright_auth'] / str(self.id)
+        self._har_dir_path = self.paths['har'] / str(self.id)
         self._db_filepath = self.paths['db']
         self._auth_path.mkdir(parents=True, exist_ok=True)
         if not self._db_filepath.exists():
@@ -178,6 +181,7 @@ class BaseCampaign:
             self._browser_context = await p.create_context_with_callee_as_owner(headless, **options)
             if self._browser_context is None:
                 raise ValueError("Failed to create a browser context")
+            self.headless = headless
             self._update_status("running")
         
     async def stop(self) -> None:
@@ -199,6 +203,7 @@ class BaseCampaign:
                 self._browser_context = None
             self._browser_context = await p.create_context_with_callee_as_owner(headless, **options)
             if self._browser_context is None: raise ValueError("Failed to create a browser context")
+            self.headless = headless
             self._update_status("running")
     
     async def pause(self) -> BrowserContext:
@@ -216,6 +221,27 @@ class BaseCampaign:
                 raise ValueError("Browser context already running. Perhaps pause the campaign first")
             else: self._browser_context = paused_context
             self._update_status("running")
+
+    async def _raise_on_http_status_code(self, resp: Response | int | None, func_name: str) -> None:
+        """
+        Raise an exception if the HTTP response status code indicates an error.
+
+        Args:
+            response (Response): The HTTP response object to check.
+        Raises:
+            ValueError: If the response status code is not in the 2xx range.
+        """
+        if resp is None:
+            self._logger.warning(f"No response received. Possible network error or timeout in {func_name}.")
+            raise ValueError(f"No response received. Possible network error or timeout in {func_name}.")
+        if isinstance(resp, Response) and resp.status == 429:
+            self._logger.warning(f"Possible Rate Limiting detected. Received HTTP 429 from {func_name}.")
+            raise ValueError(f"Possible Rate Limiting detected. Received HTTP 429 from {func_name}.")
+        if isinstance(resp, int):
+            if resp == 429:
+                self._logger.warning(f"Possible Rate Limiting detected. Received HTTP 429 from {func_name}.")
+                raise ValueError(f"Possible Rate Limiting detected. Received HTTP 429 from {func_name}.")
+        await asyncio.sleep(300)
 
     def _normalize_request_body(self, body: dict, interpolated_values: dict) -> str:
         """
@@ -291,10 +317,12 @@ class BaseCampaign:
                             raise ValueError(f"Multiple pages have the same URL: {page_url}. Perhaps restart the campaign.")
                         page = p
                 if page is None:
+                    self._logger.debug(f"No existing page found with URL: {page_url}. Creating a new page.")
                     page = await self._browser_context.new_page()
-                    resp = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
-                await asyncio.sleep(5)
+                res = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
+                await self._raise_on_http_status_code(res, "authenticate_page_goto")
                 resp = await send_request(page, page_url, new_endpoint)
+                await self._raise_on_http_status_code(resp["status"], "authenticate_send_request")
                             
                 resp_ok = resp.get("ok")
                 if resp_ok is not None and not resp_ok:
@@ -308,6 +336,126 @@ class BaseCampaign:
                                     )
                     raise ValueError(f"Authentication failed ({resp['status']}): {str(resp['data'])}...")
             self._authenticated = True
+    
+    async def scout(self, page_url: str, force: bool, playwright: PlaywrightManager,
+                        headers: dict | None = None, endpoints: list[tuple[str, dict]] | None = None,
+                        ) -> tuple[bool, str, str, int]:
+        """
+        Records a HAR file for a given campaign by visiting the provided URL.
+        If the HAR file already exists and force is set to True, it will overwrite the existing file.
+        Ensure the provided URL matches the expected root domain for the campaign.
+        There are no tools to insert campaigns or select credentials.
+        Requests to the provided endpoints will be sent after visiting the URL in form of fetch requests
+        Responses will be recorded in the HAR file.
+
+        Args:
+            campaign (Campaign): The Campaign object for which to record the HAR file.
+            url (str): The URL to visit for recording the HAR file.
+            force (bool): If True, overwrite the existing HAR file if it exists. Default is False.
+            headers (dict | None): Optional HTTP headers to set on the page. Default is None.
+            endpoints (list[tuple[str, dict]] | None): Optional list of endpoints to send fetch requests to after visiting the URL. Each endpoint is a tuple of (url, request_init).
+            offset (int): Offset for the HAR content to return. Default is 0.
+            limit (int): Limit for the HAR content to return. Default is 150000.
+
+        Returns:
+            tuple[bool, str, str, int]:
+            A tuple containing a success status, a message, the HAR content (if successful), and the size of the HAR content.
+        """
+        context: BrowserContext | None = None
+        har_file_path: Path | None = None
+        recovered_via_close = False
+        paused = False
+        try:
+            parsed_url = urlparse(page_url)
+            if not does_url_match_campaign(page_url, self.url):
+                return False, f"'{page_url}' does not match expected root domain for campaign {self.id}", "", 0
+            har_path = hashlib.md5(parsed_url.geturl().encode()).hexdigest() + ".har"
+            Path.mkdir(self._har_dir_path, parents=True, exist_ok=True)
+            har_file_path = self._har_dir_path / har_path
+            if har_file_path.exists() and not force:
+                m_timestamp = har_file_path.stat().st_mtime
+                m_time = datetime.fromtimestamp(m_timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                har_size = har_file_path.stat().st_size
+                har_content = har_file_path.read_text(encoding='utf-8')
+                return True, f"Campaign {self.id} already scouted at {m_time}.", har_content, har_size
+            har_file_path.unlink(missing_ok=True)
+            context = await self.pause()
+            paused = True
+            page: Page | None = None
+            await context.tracing.start_har(har_file_path, mode="full", content="embed")
+            for p in context.pages:
+                if p.url == page_url:
+                    self._logger.debug(f"Found existing page with URL: {page_url}. Using this page for scouting.")
+                    if page is not None:
+                        raise ValueError(f"Multiple pages found with the same URL: {page_url}. Perhaps restart the self.")
+                    page = p
+            if page is None:
+                self._logger.debug(f"No existing page found with URL: {page_url}. Creating a new page.")
+                page = await context.new_page()
+
+            if headers is None: headers = {}
+            await page.set_extra_http_headers(headers)
+            res = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
+            await self._raise_on_http_status_code(res, "scout_page_goto")
+            await page.wait_for_timeout(5_000)
+
+            if endpoints is None: endpoints = []
+            for endpoint in endpoints:
+                await asyncio.sleep(5)
+                if not does_url_match_campaign(endpoint[0], self.url):
+                    self._logger.warning(f"'{endpoint[0]}' does not match expected root domain for campaign '{self.id}'. Skipping...")
+                    continue
+                resp = await send_request(page, page_url, endpoint)
+                await self._raise_on_http_status_code(resp["status"], "scout_send_request")
+                await page.wait_for_timeout(1_000)
+            try:
+                await asyncio.wait_for(context.tracing.stop_har(), timeout=30)
+                await self.resume(context)
+            except asyncio.TimeoutError:
+                self._logger.warning("stop_har() ack never arrived; forcing close to flush")
+                try:
+                    await asyncio.wait_for(context.close(), timeout=30)
+                    context = await playwright.create_context_with_callee_as_owner()
+                    await self.resume(context)
+                except Exception:
+                    self._logger.warning("close() also failed/timed out; proceeding to restart anyway")
+                await self.restart(playwright)
+                recovered_via_close = True
+            context = None
+            if not har_file_path.exists() or har_file_path.stat().st_size == 0:
+                return False, f"Failed to record HAR file for campaign '{self.id}'.", "", 0
+            har_size = har_file_path.stat().st_size
+            har_content = har_file_path.read_text(encoding='utf-8')
+            return True, (
+                f"Campaign {self.id} scouted successfully "
+                f"{'with' if recovered_via_close else 'without'} timeout"
+            ), har_content, har_size
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            await self.restart(playwright)
+            if har_file_path is None or not har_file_path.exists() or har_file_path.stat().st_size == 0:
+                return False, f"After Timeout, failed to record HAR for campaign {self.id}", "", 0
+            har_size = har_file_path.stat().st_size
+            har_content = har_file_path.read_text(encoding='utf-8')
+            self._logger.error("Timeout while scouting self. Campaign was restarted.")
+            return True, "Timeout while scouting. Campaign was restarted.", har_content, har_size
+        except ValueError as ve:
+            self._logger.error("Error while scouting campaign: %s", str(ve))
+            if paused and self._browser_context is None:
+                try:
+                    new_context = await playwright.create_context_with_callee_as_owner()
+                    await self.resume(new_context)
+                except Exception:
+                    self._logger.exception("Failed to recover campaign context after ValueError")
+            return False, f"Error: {str(ve)}", "", 0
+        except Exception as e:
+            self._logger.exception("Error while scouting campaign")
+            if paused and self._browser_context is None:
+                try:
+                    new_context = await playwright.create_context_with_callee_as_owner()
+                    await self.resume(new_context)
+                except Exception:
+                    self._logger.exception("Failed to recover campaign context after unexpected error")
+            return False, f"Internal Server Error in fetching campaigns: {str(e)}", "", 0
 
 @dataclass
 class Campaign(BaseCampaign):
@@ -320,7 +468,11 @@ class Campaign(BaseCampaign):
             if not callable(getattr(self, "_authenticate", None)):
                 func: Callable[[Campaign], Awaitable[dict]] = getattr(plugin, "authenticate")
                 if func is not None: self._authenticate = func
+            if not callable(getattr(self, "_scout", None)):
+                func: Callable[[Campaign], Awaitable[dict]] = getattr(plugin, "scout")
+                if func is not None: self._scout = func
         if not callable(getattr(self, "_authenticate", None)): self._authenticate = None
+        if not callable(getattr(self, "_scout", None)): self._scout = None
 
     async def authenticate(self, page_url: str, endpoint: tuple[str, dict | None],
                            expected_codes: tuple[int, ...]) -> None:
@@ -331,7 +483,19 @@ class Campaign(BaseCampaign):
             await super().authenticate(**kwargs)
         except Exception as e:
             self._logger.exception("Authentication failed for campaign %s", self.name)
-            raise Exception("Authentication failed for campaign") from e 
+            raise Exception("Authentication failed for campaign") from e
+
+    async def scout(self, page_url: str, force: bool, playwright: PlaywrightManager,
+                    headers: dict | None = None, endpoints: list[tuple[str, dict]] | None = None) -> tuple[bool, str, str, int]:
+        kwargs = {"page_url": page_url, "force": force, "playwright": playwright,
+                  "headers": headers, "endpoints": endpoints}
+        try:
+            if callable(getattr(self, "_scout", None)) and self._scout is not None:
+                kwargs = await self._scout(self, **kwargs)
+            return await super().scout(**kwargs)
+        except Exception as e:
+            self._logger.exception("Scouting failed for campaign %s", self.name)
+            return False, f"Scouting failed for campaign {self.name}: {str(e)}", "", 0
 
 @dataclass
 class CampaignManager:
@@ -363,3 +527,6 @@ class Plugin():
     async def authenticate(self, campaign: Campaign, **kwargs) -> dict:
         campaign_name = campaign.name
         raise NotImplementedError(f"No authentication for {self.name} on {campaign_name}: {kwargs}")
+    async def scout(self, campaign: Campaign, **kwargs) -> dict:
+        campaign_name = campaign.name
+        raise NotImplementedError(f"No scouting for {self.name} on {campaign_name}: {kwargs}")
