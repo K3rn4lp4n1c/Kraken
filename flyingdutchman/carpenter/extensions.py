@@ -413,8 +413,10 @@ class BaseCampaign:
             except asyncio.TimeoutError:
                 self._logger.warning("stop_har() ack never arrived; forcing close to flush")
                 try:
+                    storage_state = await context.storage_state()
                     await asyncio.wait_for(context.close(), timeout=30)
                     context = await playwright.create_context_with_callee_as_owner()
+                    await context.set_storage_state(storage_state)
                     await self.resume(context)
                 except Exception:
                     self._logger.warning("close() also failed/timed out; proceeding to restart anyway")
