@@ -204,6 +204,8 @@ class Campaign:
     _authenticated: bool = field(default=False, init=False)
     _browser_context: BrowserContext | None = field(default=None, init=False)
     _challenges: list[Challenge] = field(default_factory=list, init=False)
+    _authenticate_plugin: Callable[..., Awaitable[dict]] | None = field(default=None, init=False)
+    _scout_plugin: Callable[..., Awaitable[dict]] | None = field(default=None, init=False)
 
     @property
     def challenges(self) -> list[Challenge]: return self._challenges
