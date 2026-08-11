@@ -1,7 +1,7 @@
 from pathlib import Path
 from dataclasses import dataclass, field
 from playwright.async_api import StorageState
-from .extensions import Campaign, Plugin
+from .extensions import Campaign, Plugin, CampaignPlugin, ChallengePlugin, InstancePlugin
 
 import json
 import logging
@@ -13,7 +13,7 @@ ASSETS_DIRPATH = PROJECT_ROOT.parent / "assets"
 HAR_DIRPATH = ASSETS_DIRPATH / "har"
 
 @dataclass
-class _HTBAuth(Plugin):
+class _HTBAuth(CampaignPlugin):
     name: str = "htb-auth"
     description: str = """Hack The Box authentication plugin.
     The plugin extracts the access token from a HAR file generated during the HTB SSO callback
