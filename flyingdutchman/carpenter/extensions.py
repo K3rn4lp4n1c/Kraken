@@ -153,19 +153,15 @@ class InstanceAndFilesPlugin(Plugin):
 
 @dataclass
 class InstanceAndFiles:
-    protocol: str
-    host: str
-    port: int
+    protocol: str | None = None
+    host: str | None = None
+    port: int | None = None
+    files: list[str] | None = None
 
-    async def start(self, campaign: Campaign, **kwargs) -> None:
-        pass
-
-    async def stop(self, campaign: Campaign, **kwargs) -> None:
-        pass
-
-    async def restart(self, campaign: Campaign, **kwargs) -> None:
-        await self.stop(campaign, **kwargs)
-        await self.start(campaign, **kwargs)
+    async def start(self): pass
+    async def stop(self): pass
+    async def delete(self): pass
+    async def download(self): pass
 
 @dataclass
 class Challenge:
@@ -176,7 +172,7 @@ class Challenge:
     solves: int = 0
     scout_format: tuple[str, list[tuple[str, dict]]] | None = None # (page_url, [(endpoint_url, request_init), ...])
     platform_id: str | None = None
-    instance: InstanceAndFiles | None = None
+    instance_and_files: InstanceAndFiles | None = None
     flag: str | None = None
 
     def __iter__(self):
@@ -187,7 +183,7 @@ class Challenge:
         yield 'solves', self.solves
         yield 'scout_format', self.scout_format
         yield 'platform_id', self.platform_id
-        yield 'instance', self.instance
+        yield 'instance', self.instance_and_files
         yield 'flag', self.flag
 
     def __post_init__(self):
@@ -604,18 +600,37 @@ class Campaign:
                 message_per_challenge.append(message)
                 self._challenges.append(c)
 
-    def append(self, new_challenges: list[Challenge]) -> None:
+    def _peek(self, mode: str = "minimal", offset: int = 0, limit: int = 100,
+            filters: tuple[dict] | None = None) -> list[dict]:
         """
-        Append new challenges to the campaign's existing challenges.
+        Peek at the campaign's challenges without modifying them.
 
         Args:
-            new_challenges (list[Challenge]): A list of Challenge objects to be added.
+            mode (str): The mode of peeking, which can be "minimal" or "full". Determines the level of detail in the returned challenge dictionaries.
+            offset (int): The starting index for the challenges to peek at.
+            limit (int): The maximum number of challenges to return.
+            filters (tuple[dict] | None): Optional filters to apply to the challenges.
+
+        Returns:
+            list[dict]: A list of challenge dictionaries based on the specified offset, limit, and filters.
         """
-        try:
-            self._append(new_challenges)
-        except Exception as e:
-            self._logger.exception("Error while appending challenges to campaign '%s': %s", self.name, str(e))
-            raise ValueError(f"Internal Server Error in appending challenges: {str(e)}") from e
+        challenges = [dict(c) for c in self._challenges] if mode == "full" else [
+            {
+                "title": c.title,
+                "description": c.description,
+                "points": c.points,
+                "category": c.category,
+                "solves": c.solves,
+                "platform_id": c.platform_id,
+            }
+            for c in self._challenges
+        ]
+        if filters:
+            for f in filters:
+                challenges = [challenge for challenge in challenges if all(challenge.get(k) == v for k, v in f.items())]
+        offset = max(min(offset, len(challenges)), 0)
+        limit = max(min(limit, len(challenges) - offset), 0)
+        return challenges[offset:offset + limit]
 
     async def authenticate(self, page_url: str, endpoint: tuple[str, dict | None],
                            expected_codes: tuple[int, ...]) -> None:
@@ -634,6 +649,37 @@ class Campaign:
             self._logger.exception("Scouting failed for campaign %s", self.name)
             return False, f"Scouting failed for campaign {self.name}: {str(e)}", "", 0
 
+    def append(self, new_challenges: list[Challenge]) -> None:
+            """
+            Append new challenges to the campaign's existing challenges.
+    
+            Args:
+                new_challenges (list[Challenge]): A list of Challenge objects to be added.
+            """
+            try:
+                self._append(new_challenges)
+            except Exception as e:
+                self._logger.exception("Error while appending challenges to campaign '%s': %s", self.name, str(e))
+                raise ValueError(f"Internal Server Error in appending challenges: {str(e)}") from e
+
+    def peek(self, mode: str = "minimal", offset: int = 0, limit: int = 100,
+            filters: tuple[dict] | None = None) -> list[dict]:
+        """
+        Peek at the campaign's challenges without modifying them.
+
+        Args:
+            offset (int): The starting index for the challenges to peek at.
+            limit (int): The maximum number of challenges to return.
+            filters (tuple[dict] | None): Optional filters to apply to the challenges.
+
+        Returns:
+            list[dict]: A list of challenge dictionaries based on the specified offset, limit, and filters.
+        """
+        try:
+            return self._peek(mode, offset, limit, filters)
+        except Exception as e:
+            self._logger.exception("Error while peeking challenges in campaign '%s': %s", self.name, str(e))
+            raise ValueError(f"Internal Server Error in peeking challenges: {str(e)}") from e
 
 @dataclass
 class CampaignManager:
