@@ -1,7 +1,7 @@
 from pathlib import Path
 from dataclasses import dataclass, field
 from playwright.async_api import StorageState
-from .extensions import Campaign, Plugin, CampaignPlugin, ChallengePlugin, InstancePlugin
+from .extensions import Campaign, Plugin, CampaignPlugin, ChallengePlugin, InstanceAndFilesPlugin
 
 import json
 import logging
