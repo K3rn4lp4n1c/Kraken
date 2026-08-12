@@ -60,7 +60,10 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
     har_content = _slice_har_content(har_content, offset, limit)
     return success, message, har_content, har_size, screenshot_bytes
 
-@navigator.tool()
+# output_schema=None: when screenshot=True this returns a list (text + inline
+# image) instead of a dict. An auto-inferred output schema expects structured
+# dict output on every call and rejects the list response client-side.
+@navigator.tool(output_schema=None)
 async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: dict | None = None,
                         endpoints: list[tuple[str, dict]] | None = None,
                         offset: int = 0, limit: int = 150_000,
