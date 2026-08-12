@@ -384,40 +384,39 @@ class Campaign:
             new_endpoint = kwargs.get("endpoint", new_endpoint)
             expected_codes = kwargs.get("expected_codes", expected_codes)
 
-        async with self._lifecycle_lock:
-            if self._browser_context is None:
-                raise ValueError("No browser context provided. Perhaps restart the campaign")
-            if self._browser_context.is_closed():
-                raise ValueError("No browser context provided. Perhaps restart the campaign")
-            if not does_url_match_campaign(page_url, self.url):
-                raise ValueError("The provided URL does not match the campaign's URL.")
+        if self._browser_context is None:
+            raise ValueError("No browser context provided. Perhaps restart the campaign")
+        if self._browser_context.is_closed():
+            raise ValueError("No browser context provided. Perhaps restart the campaign")
+        if not does_url_match_campaign(page_url, self.url):
+            raise ValueError("The provided URL does not match the campaign's URL.")
 
-            page: Page | None = None
-            for p in self._browser_context.pages:
-                if p.url == page_url:
-                    if page is not None:
-                        raise ValueError(f"Multiple pages have the same URL: {page_url}. Perhaps restart the campaign.")
-                    page = p
-            if page is None:
-                self._logger.debug(f"No existing page found with URL: {page_url}. Creating a new page.")
-                page = await self._browser_context.new_page()
+        page: Page | None = None
+        for p in self._browser_context.pages:
+            if p.url == page_url:
+                if page is not None:
+                    raise ValueError(f"Multiple pages have the same URL: {page_url}. Perhaps restart the campaign.")
+                page = p
+        if page is None:
+            self._logger.debug(f"No existing page found with URL: {page_url}. Creating a new page.")
+            page = await self._browser_context.new_page()
 
-            res = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
-            await self._raise_on_http_status_code(res, "authenticate_page_goto")
-            resp = await send_request(page, page_url, new_endpoint)
-            await self._raise_on_http_status_code(resp["status"], "authenticate_send_request")
+        res = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
+        await self._raise_on_http_status_code(res, "authenticate_page_goto")
+        resp = await send_request(page, page_url, new_endpoint)
+        await self._raise_on_http_status_code(resp["status"], "authenticate_send_request")
 
-            resp_ok = resp.get("ok")
-            if resp_ok is not None and not resp_ok:
-                self._logger.warning(f"Failed to send HTTP request: Response data:"
-                                     f"{str(resp['data'])[:200]}")
-                raise ValueError(f"Authentication failed ({resp['status']}): {str(resp['data'])}")
-            if resp["status"] not in expected_codes:
-                self._logger.warning(f"Authentication failed ({resp['status']}). "
-                                     f"Expected codes: {expected_codes}. "
-                                     f"Response data: {str(resp['data'])[:200]}..."
-                                     )
-                raise ValueError(f"Authentication failed ({resp['status']}): {str(resp['data'])}...")
+        resp_ok = resp.get("ok")
+        if resp_ok is not None and not resp_ok:
+            self._logger.warning(f"Failed to send HTTP request: Response data:"
+                                    f"{str(resp['data'])[:200]}")
+            raise ValueError(f"Authentication failed ({resp['status']}): {str(resp['data'])}")
+        if resp["status"] not in expected_codes:
+            self._logger.warning(f"Authentication failed ({resp['status']}). "
+                                    f"Expected codes: {expected_codes}. "
+                                    f"Response data: {str(resp['data'])[:200]}..."
+                                    )
+            raise ValueError(f"Authentication failed ({resp['status']}): {str(resp['data'])}...")
         self._authenticated = True
 
     async def _scout(self, page_url: str, force: bool, playwright: PlaywrightManager,
@@ -458,62 +457,58 @@ class Campaign:
                 headers = kwargs.get("headers", headers)
                 endpoints = kwargs.get("endpoints", endpoints)
 
-            async with self._lifecycle_lock:
-                context = await self.pause()
-                paused = True
-                page: Page | None = None
-                await context.tracing.start_har(har_file_path, mode="full", content="embed")
-                for p in context.pages:
-                    if p.url == page_url:
-                        self._logger.debug(f"Found existing page with URL: {page_url}. Using this page for scouting.")
-                        if page is not None:
-                            raise ValueError(f"Multiple pages found with the same URL: {page_url}. Perhaps restart the self.")
-                        page = p
-                if page is None:
-                    self._logger.debug(f"No existing page found with URL: {page_url}. Creating a new page.")
-                    page = await context.new_page()
+            context = await self.pause()
+            paused = True
+            page: Page | None = None
+            await context.tracing.start_har(har_file_path, mode="full", content="embed")
+            for p in context.pages:
+                if p.url == page_url:
+                    self._logger.debug(f"Found existing page with URL: {page_url}. Using this page for scouting.")
+                    if page is not None:
+                        raise ValueError(f"Multiple pages found with the same URL: {page_url}. Perhaps restart the self.")
+                    page = p
+            if page is None:
+                self._logger.debug(f"No existing page found with URL: {page_url}. Creating a new page.")
+                page = await context.new_page()
 
-                if headers is None:
-                    headers = {}
-                await page.set_extra_http_headers(headers)
-                res = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
-                await self._raise_on_http_status_code(res, "scout_page_goto")
-                await page.wait_for_timeout(5_000)
+            if headers is None: headers = {}
+            await page.set_extra_http_headers(headers)
+            res = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
+            await self._raise_on_http_status_code(res, "scout_page_goto")
+            await page.wait_for_timeout(5_000)
 
-                if endpoints is None:
-                    endpoints = []
-                for endpoint in endpoints:
-                    await asyncio.sleep(5)
-                    if not does_url_match_campaign(endpoint[0], self.url):
-                        self._logger.warning(f"'{endpoint[0]}' does not match expected root domain for campaign '{self.id}'. Skipping...")
-                        continue
-                    resp = await send_request(page, page_url, endpoint)
-                    await self._raise_on_http_status_code(resp["status"], "scout_send_request")
-                    await page.wait_for_timeout(1_000)
+            if endpoints is None: endpoints = []
+            for endpoint in endpoints:
+                if not does_url_match_campaign(endpoint[0], self.url):
+                    self._logger.warning(f"'{endpoint[0]}' does not match expected root domain for campaign '{self.id}'. Skipping...")
+                    continue
+                resp = await send_request(page, page_url, endpoint)
+                await self._raise_on_http_status_code(resp["status"], "scout_send_request")
+                await page.wait_for_timeout(1_000)
+            try:
+                await asyncio.wait_for(context.tracing.stop_har(), timeout=30)
+                await self.resume(context)
+            except asyncio.TimeoutError:
+                self._logger.warning("stop_har() ack never arrived; forcing close to flush")
                 try:
-                    await asyncio.wait_for(context.tracing.stop_har(), timeout=30)
+                    storage_state = await context.storage_state()
+                    await asyncio.wait_for(context.close(), timeout=30)
+                    context = await playwright.create_context_with_callee_as_owner()
+                    await context.set_storage_state(storage_state)
                     await self.resume(context)
-                except asyncio.TimeoutError:
-                    self._logger.warning("stop_har() ack never arrived; forcing close to flush")
-                    try:
-                        storage_state = await context.storage_state()
-                        await asyncio.wait_for(context.close(), timeout=30)
-                        context = await playwright.create_context_with_callee_as_owner()
-                        await context.set_storage_state(storage_state)
-                        await self.resume(context)
-                    except Exception:
-                        self._logger.warning("close() also failed/timed out; proceeding to restart anyway")
-                    await self.restart(playwright)
-                    recovered_via_close = True
-                context = None
-                if not har_file_path.exists() or har_file_path.stat().st_size == 0:
-                    return False, f"Failed to record HAR file for campaign '{self.id}'.", "", 0
-                har_size = har_file_path.stat().st_size
-                har_content = har_file_path.read_text(encoding='utf-8')
-                return True, (
-                    f"Campaign {self.id} scouted successfully "
-                    f"{'with' if recovered_via_close else 'without'} timeout"
-                ), har_content, har_size
+                except Exception:
+                    self._logger.warning("close() also failed/timed out; proceeding to restart anyway")
+                await self.restart(playwright)
+                recovered_via_close = True
+            context = None
+            if not har_file_path.exists() or har_file_path.stat().st_size == 0:
+                return False, f"Failed to record HAR file for campaign '{self.id}'.", "", 0
+            har_size = har_file_path.stat().st_size
+            har_content = har_file_path.read_text(encoding='utf-8')
+            return True, (
+                f"Campaign {self.id} scouted successfully "
+                f"{'with' if recovered_via_close else 'without'} timeout"
+            ), har_content, har_size
         except (asyncio.CancelledError, asyncio.TimeoutError):
             async with self._lifecycle_lock:
                 await self.restart(playwright)
