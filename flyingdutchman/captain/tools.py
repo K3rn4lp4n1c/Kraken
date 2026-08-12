@@ -2,7 +2,7 @@ from . import captain
 from flyingdutchman import (
     playwright, campaigns, DB_PATH, HAR_DIRPATH, PLAYWRIGHT_AUTH_DIRPATH, PlaywrightManager as PM
 )
-from flyingdutchman.carpenter import Campaign, PLUGINS, env, sqlite3_connect
+from flyingdutchman.carpenter import Campaign, Plugin, PLUGINS, env, sqlite3_connect
 
 import logging
 
@@ -58,7 +58,7 @@ def _load_campaigns_from_db(campaign_ids: list[str], plugin_names: list[str] | N
         campaign_ids (list[str]): List of campaign IDs to load.
     """
     logger = logging.getLogger(__name__)
-    plugins: list = []
+    plugins: list[Plugin] = []
     try:
         for plugin_name in plugin_names or []:
             plugin = PLUGINS.get(plugin_name)
@@ -68,7 +68,7 @@ def _load_campaigns_from_db(campaign_ids: list[str], plugin_names: list[str] | N
         with sqlite3_connect(DB_PATH) as conn:
             cursor = conn.cursor()
             table_name = env("CAMPAIGNS_TABLE")[0]
-            fields = ["id", "name", "datetime", "url", "status"]
+            fields = ["id", "name", "datetime", "url", "status", "challenge"]
             cursor.execute("SELECT {} FROM {} WHERE id IN {}".format(
                 ', '.join(fields), table_name, "(" + ",".join("?" for _ in campaign_ids) + ")"
             ), campaign_ids)
@@ -77,7 +77,7 @@ def _load_campaigns_from_db(campaign_ids: list[str], plugin_names: list[str] | N
                 campaign_data = dict(zip(fields, row))
                 campaign = Campaign(**campaign_data, paths={
                     "db": DB_PATH, "har": HAR_DIRPATH, "playwright_auth": PLAYWRIGHT_AUTH_DIRPATH,
-                }, plugins=plugins)
+                }, plugins=tuple(plugins))
                 campaigns.add_campaign(campaign)
         return True, f"Campaigns {', '.join(campaign_ids)} loaded successfully."
     except Exception as e:

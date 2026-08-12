@@ -2,6 +2,7 @@ from . import flyingdutchman, playwright, campaigns
 from dotenv import load_dotenv
 from flyingdutchman.captain import captain
 from flyingdutchman.navigator import navigator
+from flyingdutchman.quartermaster import quartermaster
 from flyingdutchman.carpenter import carpenter, configure_logger, env
 
 import logging
@@ -12,6 +13,7 @@ def _mount_subservers():
     flyingdutchman.mount(captain, "captain")
     flyingdutchman.mount(navigator, "navigator")
     flyingdutchman.mount(carpenter, "carpenter")
+    flyingdutchman.mount(quartermaster, "quartermaster")
     logger.debug("Subservers mounted successfully.")
 
 async def main():
