@@ -436,7 +436,10 @@ class Campaign:
             har_path = hashlib.md5(parsed_url.geturl().encode()).hexdigest() + ".har"
             Path.mkdir(self._har_dir_path, parents=True, exist_ok=True)
             har_file_path = self._har_dir_path / har_path
-            if har_file_path.exists() and not force:
+            # screenshot is never cached (unlike the HAR) — a cache hit here
+            # would otherwise silently return None even when screenshot=True
+            # was explicitly requested, so skip the shortcut in that case.
+            if har_file_path.exists() and not force and not screenshot:
                 m_timestamp = har_file_path.stat().st_mtime
                 m_time = datetime.fromtimestamp(m_timestamp).strftime('%Y-%m-%d %H:%M:%S')
                 har_size = har_file_path.stat().st_size
