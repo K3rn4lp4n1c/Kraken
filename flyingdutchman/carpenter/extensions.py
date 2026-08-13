@@ -419,25 +419,30 @@ class Campaign:
 
     async def _scout(self, page_url: str, force: bool, playwright: PlaywrightManager,
                       headers: dict | None = None, endpoints: list[tuple[str, dict]] | None = None,
-                      ) -> tuple[bool, str, str, int]:
+                      screenshot: bool = False,
+                      ) -> tuple[bool, str, str, int, bytes | None]:
         context: BrowserContext | None = None
         har_file_path: Path | None = None
         recovered_via_close = False
         paused = False
+        screenshot_bytes: bytes | None = None
 
         try:
             parsed_url = urlparse(page_url)
             if not does_url_match_campaign(page_url, self.url):
-                return False, f"'{page_url}' does not match expected root domain for campaign {self.id}", "", 0
+                return False, f"'{page_url}' does not match expected root domain for campaign {self.id}", "", 0, None
             har_path = hashlib.md5(parsed_url.geturl().encode()).hexdigest() + ".har"
             Path.mkdir(self._har_dir_path, parents=True, exist_ok=True)
             har_file_path = self._har_dir_path / har_path
-            if har_file_path.exists() and not force:
+            # screenshot is never cached (unlike the HAR) — a cache hit here
+            # would otherwise silently return None even when screenshot=True
+            # was explicitly requested, so skip the shortcut in that case.
+            if har_file_path.exists() and not force and not screenshot:
                 m_timestamp = har_file_path.stat().st_mtime
                 m_time = datetime.fromtimestamp(m_timestamp).strftime('%Y-%m-%d %H:%M:%S')
                 har_size = har_file_path.stat().st_size
                 har_content = har_file_path.read_text(encoding='utf-8')
-                return True, f"Campaign {self.id} already scouted at {m_time}.", har_content, har_size
+                return True, f"Campaign {self.id} already scouted at {m_time}.", har_content, har_size, None
             har_file_path.unlink(missing_ok=True)
 
             if callable(self._scout_plugin):
@@ -448,12 +453,14 @@ class Campaign:
                     playwright=playwright,
                     headers=headers,
                     endpoints=endpoints,
+                    screenshot=screenshot,
                 )
                 page_url = kwargs.get("page_url", page_url)
                 force = kwargs.get("force", force)
                 playwright = kwargs.get("playwright", playwright)
                 headers = kwargs.get("headers", headers)
                 endpoints = kwargs.get("endpoints", endpoints)
+                screenshot = kwargs.get("screenshot", screenshot)
 
             context = await self.pause()
             paused = True
@@ -474,6 +481,12 @@ class Campaign:
             res = await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
             await self._raise_on_http_status_code(res, "scout_page_goto")
             await page.wait_for_timeout(5_000)
+
+            if screenshot:
+                try:
+                    screenshot_bytes = await page.screenshot(full_page=True, type="png")
+                except Exception as e:
+                    raise ValueError(f"Screenshot capture failed: {str(e)}") from e
 
             if endpoints is None: endpoints = []
             for endpoint in endpoints:
@@ -500,22 +513,22 @@ class Campaign:
                 recovered_via_close = True
             context = None
             if not har_file_path.exists() or har_file_path.stat().st_size == 0:
-                return False, f"Failed to record HAR file for campaign '{self.id}'.", "", 0
+                return False, f"Failed to record HAR file for campaign '{self.id}'.", "", 0, None
             har_size = har_file_path.stat().st_size
             har_content = har_file_path.read_text(encoding='utf-8')
             return True, (
                 f"Campaign {self.id} scouted successfully "
                 f"{'with' if recovered_via_close else 'without'} timeout"
-            ), har_content, har_size
+            ), har_content, har_size, screenshot_bytes
         except (asyncio.CancelledError, asyncio.TimeoutError):
             async with self._lifecycle_lock:
                 await self.restart(playwright)
             if har_file_path is None or not har_file_path.exists() or har_file_path.stat().st_size == 0:
-                return False, f"After Timeout, failed to record HAR for campaign {self.id}", "", 0
+                return False, f"After Timeout, failed to record HAR for campaign {self.id}", "", 0, None
             har_size = har_file_path.stat().st_size
             har_content = har_file_path.read_text(encoding='utf-8')
             self._logger.error("Timeout while scouting self. Campaign was restarted.")
-            return True, "Timeout while scouting. Campaign was restarted.", har_content, har_size
+            return True, "Timeout while scouting. Campaign was restarted.", har_content, har_size, None
         except ValueError as ve:
             self._logger.error("Error while scouting campaign: %s", str(ve))
             if paused and self._browser_context is None:
@@ -525,7 +538,7 @@ class Campaign:
                         await self.resume(new_context)
                 except Exception:
                     self._logger.exception("Failed to recover campaign context after ValueError")
-            return False, f"Error: {str(ve)}", "", 0
+            return False, f"Error: {str(ve)}", "", 0, None
         except Exception as e:
             self._logger.exception("Error while scouting campaign")
             if paused and self._browser_context is None:
@@ -535,7 +548,7 @@ class Campaign:
                         await self.resume(new_context)
                 except Exception:
                     self._logger.exception("Failed to recover campaign context after unexpected error")
-            return False, f"Internal Server Error in fetching campaigns: {str(e)}", "", 0
+            return False, f"Internal Server Error in fetching campaigns: {str(e)}", "", 0, None
 
     def _append(self, new_challenges: str | list[str] | list[dict] | dict | list[Challenge] | None
                 ) -> None:
@@ -654,13 +667,14 @@ class Campaign:
             raise Exception("Authentication failed for campaign") from e
 
     async def scout(self, page_url: str, force: bool, playwright: PlaywrightManager,
-                    headers: dict | None = None, endpoints: list[tuple[str, dict]] | None = None
-                    ) -> tuple[bool, str, str, int]:
+                    headers: dict | None = None, endpoints: list[tuple[str, dict]] | None = None,
+                    screenshot: bool = False,
+                    ) -> tuple[bool, str, str, int, bytes | None]:
         try:
-            return await self._scout(page_url, force, playwright, headers, endpoints)
+            return await self._scout(page_url, force, playwright, headers, endpoints, screenshot)
         except Exception as e:
             self._logger.exception("Scouting failed for campaign %s", self.name)
-            return False, f"Scouting failed for campaign {self.name}: {str(e)}", "", 0
+            return False, f"Scouting failed for campaign {self.name}: {str(e)}", "", 0, None
 
     def append(self, new_challenges: list[Challenge]) -> None:
             """

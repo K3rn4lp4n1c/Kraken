@@ -1,9 +1,11 @@
 from . import navigator
 from pathlib import Path
+from fastmcp.utilities.types import Image
 from flyingdutchman.carpenter import Campaign
 from flyingdutchman import playwright, campaigns, HAR_DIRPATH
 
 import re
+import json
 import logging
 
 def _slice_har_content(har_content: str, offset: int, limit: int) -> str:
@@ -24,7 +26,8 @@ def _slice_har_content(har_content: str, offset: int, limit: int) -> str:
 
 async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: dict | None = None,
                         endpoints: list[tuple[str, dict]] | None = None,
-                        offset: int = 0, limit: int = 150_000) -> tuple[bool, str, str, int]:
+                        offset: int = 0, limit: int = 150_000,
+                        screenshot: bool = False) -> tuple[bool, str, str, int, bytes | None]:
     """
     Records a HAR file for a given campaign by visiting the provided URL.
     If the HAR file already exists and force is set to True, it will overwrite the existing file.
@@ -41,23 +44,30 @@ async def _scout_campaign(campaign: Campaign, url: str, force: bool, headers: di
         endpoints (list[tuple[str, dict]] | None): Optional list of endpoints to send fetch requests to after visiting the URL. Each endpoint is a tuple of (url, request_init).
         offset (int): Offset for the HAR content to return. Default is 0.
         limit (int): Limit for the HAR content to return. Default is 150000.
+        screenshot (bool): If True, capture a fresh full-page screenshot. Never cached. Default is False.
 
     Returns:
-        tuple[bool, str, str, int]:
-        A tuple containing a success status, a message, the HAR content (if successful), and the size of the HAR content.
+        tuple[bool, str, str, int, bytes | None]:
+        A tuple containing a success status, a message, the HAR content (if successful), the size of
+        the HAR content, and the raw PNG screenshot bytes (if requested and captured, else None).
     """
     logger = logging.getLogger(__name__)
-    success, message, har_content, har_size = await campaign.scout(
-        url, force=force, playwright=playwright, headers=headers, endpoints=endpoints
+    success, message, har_content, har_size, screenshot_bytes = await campaign.scout(
+        url, force=force, playwright=playwright, headers=headers, endpoints=endpoints,
+        screenshot=screenshot,
     )
     if not success: logger.error(f"Error scouting campaign: {message}")
     har_content = _slice_har_content(har_content, offset, limit)
-    return success, message, har_content, har_size
+    return success, message, har_content, har_size, screenshot_bytes
 
-@navigator.tool()
+# output_schema=None: when screenshot=True this returns a list (text + inline
+# image) instead of a dict. An auto-inferred output schema expects structured
+# dict output on every call and rejects the list response client-side.
+@navigator.tool(output_schema=None)
 async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: dict | None = None,
                         endpoints: list[tuple[str, dict]] | None = None,
-                        offset: int = 0, limit: int = 150_000) -> dict:
+                        offset: int = 0, limit: int = 150_000,
+                        screenshot: bool = False) -> dict | list:
     """
     Capture a HAR snapshot for a loaded campaign at `url`.
 
@@ -98,11 +108,19 @@ async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: 
         endpoints (list[tuple[str, dict]] | None = None): Fetch requests in (url (str), request_init (dict | None)) format.
         offset (int = 0): Offset for the HAR content to return. Default is 0.
         limit (int = 150000): Limit for the HAR content to return. Default is 150000.
+        screenshot (bool = False): If True, capture a fresh full-page PNG screenshot right after the
+            page settles, before any endpoint requests fire, and return it as an inline image alongside
+            the JSON summary — so the model can actually see the page, not just its network traffic.
+            Never cached; always taken fresh, since visual state (login, banners, challenge lists) goes
+            stale immediately. If capture fails, the whole call fails so the caller knows to retry with
+            screenshot=False rather than silently getting a HAR-only result back.
 
     Returns:
-        dict: Contains `success`, `message`, `har_content` and `har_size`.
-        `har_size` is the size of the original HAR content before applying offset and limit.
-    
+        dict | list: When screenshot=False (default), a dict with `success`, `message`, `har_content`
+        and `har_size` — `har_size` is the size of the original HAR content before applying offset and
+        limit. When screenshot=True and capture succeeds, a list of `[<the same dict, as JSON text>,
+        <inline image content>]` instead, so the image renders directly in the model's context.
+
     Raises:
         If the campaign is not found, try to load it first. Refer to `load_campaign_from_db`.
         If the `page_url`'s scheme, root domain, or port does not match the campaign's, the process is aborted.
@@ -112,10 +130,13 @@ async def scout_campaign(cid: str, page_url: str, force: bool = False, headers: 
     if campaign is None:
         return {"success": False, "message": f"No campaign found with id: {cid}", "har_content": ""}
     if headers is None: headers = {}
-    success, message, har_content, size_of_har = await _scout_campaign(
-        campaign, page_url, force, headers, endpoints, offset, limit
+    success, message, har_content, size_of_har, screenshot_bytes = await _scout_campaign(
+        campaign, page_url, force, headers, endpoints, offset, limit, screenshot
     )
-    return {"success": success, "message": message, "har_content": har_content, "size_of_har": size_of_har}
+    result = {"success": success, "message": message, "har_content": har_content, "size_of_har": size_of_har}
+    if screenshot_bytes is not None:
+        return [json.dumps(result), Image(data=screenshot_bytes, format="png")]
+    return result
 
 def _safe_har_dir(cid: str) -> Path:
     """
@@ -263,7 +284,7 @@ async def triage(campaign: Campaign, url: str, endt: tuple[str, dict]) -> tuple[
 
     checklist.append("Scouting the campaign")
     try:
-        success, message, har, _ = await _scout_campaign(campaign, url, True, endpoints=[endt])
+        success, message, har, *_ = await _scout_campaign(campaign, url, True, endpoints=[endt])
         if not success: raise Exception(message)
         checks.append(True)
     except Exception as e:
