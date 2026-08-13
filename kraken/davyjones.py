@@ -8,7 +8,9 @@ import asyncio
 
 load_dotenv()
 
-transport = StdioTransport(command="python3", args=["-m", MCP_SERVER], env=os.environ.copy())
+transport = StdioTransport(command="python3",
+                           args=["-m", MCP_SERVER, "--transport", "stdio"],
+                           env=os.environ.copy())
 
 client = Client(transport=transport)
 
