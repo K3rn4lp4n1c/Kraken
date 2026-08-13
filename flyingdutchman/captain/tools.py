@@ -2,7 +2,7 @@ from . import captain
 from flyingdutchman import (
     playwright, campaigns, DB_PATH, HAR_DIRPATH, PLAYWRIGHT_AUTH_DIRPATH, PlaywrightManager as PM
 )
-from flyingdutchman.carpenter import Campaign, Plugin, PLUGINS, env, sqlite3_connect
+from flyingdutchman.carpenter import Campaign, Challenge, Plugin, PLUGINS, env, sqlite3_connect
 
 import logging
 
@@ -67,17 +67,31 @@ def _load_campaigns_from_db(campaign_ids: list[str], plugin_names: list[str] | N
 
         with sqlite3_connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            table_name = env("CAMPAIGNS_TABLE")[0]
-            fields = ["id", "name", "datetime", "url", "status", "challenge"]
+            campaign_table_name = env("CAMPAIGNS_TABLE")[0]
+            challenge_table_name = env("CHALLENGES_TABLE")[0]
+            campaign_fields = ["id", "name", "datetime", "url", "status"]
+            challenge_fields = ["title", "description", "points", "category", "flag",
+                                "solves", "scout_format", "platform_id"]
             cursor.execute("SELECT {} FROM {} WHERE id IN {}".format(
-                ', '.join(fields), table_name, "(" + ",".join("?" for _ in campaign_ids) + ")"
+                ', '.join(campaign_fields),
+                campaign_table_name,
+                "(" + ",".join("?" for _ in campaign_ids) + ")"
             ), campaign_ids)
             rows = cursor.fetchall()
             for row in rows:
-                campaign_data = dict(zip(fields, row))
+                campaign_data = dict(zip(campaign_fields, row))
                 campaign = Campaign(**campaign_data, paths={
                     "db": DB_PATH, "har": HAR_DIRPATH, "playwright_auth": PLAYWRIGHT_AUTH_DIRPATH,
                 }, plugins=tuple(plugins))
+
+                cursor.execute("SELECT {} FROM {} WHERE campaign_id = ?".format(
+                    ', '.join(challenge_fields),
+                    challenge_table_name
+                ),
+                (campaign.id,))
+                challenge_rows = cursor.fetchall()
+                challenge_data = [Challenge(**dict(zip(challenge_fields, c_row))) for c_row in challenge_rows]
+                campaign.append(challenge_data)
                 campaigns.add_campaign(campaign)
         return True, f"Campaigns {', '.join(campaign_ids)} loaded successfully."
     except Exception as e:
