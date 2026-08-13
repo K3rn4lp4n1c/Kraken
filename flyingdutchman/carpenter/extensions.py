@@ -198,7 +198,6 @@ class Campaign:
     status: str
     datetime: datetime
     paths: dict[str, Path] = field(default_factory=dict)
-    challenge: str | list[str] | list[dict] | dict | list[Challenge] | None = field(default=None)
     plugins: tuple[Plugin, ...] | None = None
     headless: bool = True
     _authenticated: bool = field(default=False, init=False)
@@ -223,7 +222,6 @@ class Campaign:
         if not self._db_filepath.exists():
             raise FileNotFoundError(f"Database file not found at {self._db_filepath}. Ensure the database is initialized.")
         self._select_plugin_methods()
-        self._append(self.challenge)  # Ensure challenges are unique upon initialization
 
     def _select_plugin_methods(self) -> None:
         plugins = self.plugins or []
@@ -596,6 +594,24 @@ class Campaign:
                 self._logger.info(message)
                 message_per_challenge.append(message)
                 self._challenges.append(c)
+                with sqlite3_connect(self._db_filepath) as conn:
+                    cursor = conn.cursor()
+                    table_name = env("CHALLENGES_TABLE")[0]
+                    cursor.execute(
+                        "INSERT INTO {} (campaign_id, title, description, points, category, solves, scout_format, platform_id,  flag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)".format(table_name),
+                        (
+                            self.id,
+                            c.title,
+                            c.description,
+                            c.points,
+                            c.category,
+                            c.solves,
+                            json.dumps(c.scout_format) if c.scout_format is not None else None,
+                            c.platform_id,
+                            c.flag
+                        )
+                    )
+                    conn.commit()
 
     def _peek(self, mode: str = "minimal", offset: int = 0, limit: int = 100,
             filters: tuple[dict] | None = None) -> list[dict]:
